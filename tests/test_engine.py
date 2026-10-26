@@ -1,0 +1,129 @@
+import pandas as pd
+
+from src.affinity_analysis import compute_affinity
+from src.baseline import allocate_baseline
+from src.evaluation import compare, evaluate
+from src.feasibility import fits_product, validate_layout
+from src.optimizer import optimize_layout
+from src.warehouse_generator import generate_warehouse
+
+
+CONFIG = {
+    "allow_rotations": True,
+    "representative_inventory_units": 1,
+    "ergonomics": {"heavy_sku_weight_kg": 10, "max_shelf_level_for_heavy_skus": 2},
+    "incompatibility_rules": {
+        "category_hazard_pairs": [{"category": "food", "hazard_class": "OXIDIZER"}],
+        "hazard_handling_pairs": [{"hazard_class": "FLAMMABLE", "handling_type": "HEAT"}],
+    },
+}
+
+
+def _locations():
+    return pd.DataFrame([
+        {"Location_ID": "L1", "Rack_ID": "R1", "Bay": 1, "Shelf_Level": 1, "Bin_Width_cm": 10, "Bin_Height_cm": 10, "Bin_Depth_cm": 10, "Volumetric_Capacity_cm3": 1000, "Max_Weight_Capacity_kg": 40, "Shelf_Max_Load_kg": 50, "Rack_Max_Load_kg": 50, "Distance_to_Dispatch_Depot_m": 2},
+        {"Location_ID": "L2", "Rack_ID": "R1", "Bay": 1, "Shelf_Level": 1, "Bin_Width_cm": 10, "Bin_Height_cm": 10, "Bin_Depth_cm": 100, "Volumetric_Capacity_cm3": 1000, "Max_Weight_Capacity_kg": 40, "Shelf_Max_Load_kg": 50, "Rack_Max_Load_kg": 50, "Distance_to_Dispatch_Depot_m": 4},
+        {"Location_ID": "L3", "Rack_ID": "R1", "Bay": 2, "Shelf_Level": 3, "Bin_Width_cm": 10, "Bin_Height_cm": 10, "Bin_Depth_cm": 10, "Volumetric_Capacity_cm3": 1000, "Max_Weight_Capacity_kg": 40, "Shelf_Max_Load_kg": 50, "Rack_Max_Load_kg": 50, "Distance_to_Dispatch_Depot_m": 6},
+    ])
+
+
+def _skus():
+    return pd.DataFrame([
+        {"SKU_ID": "a", "Width_cm": 10, "Height_cm": 10, "Depth_cm": 10, "Weight_kg": 30, "Inventory_Units": 1, "Category": "safe", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 1000, "Recorded_Order_Lines": 3, "Physical_Metadata_Usable": True, "ABC_Class": "A"},
+        {"SKU_ID": "b", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 30, "Inventory_Units": 1, "Category": "safe", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 125, "Recorded_Order_Lines": 2, "Physical_Metadata_Usable": True, "ABC_Class": "B"},
+    ])
+
+
+def _rules(layout, skus=None, locations=None, config=CONFIG):
+    return set(validate_layout(layout, _skus() if skus is None else skus, _locations() if locations is None else locations, config).Rule)
+
+
+def test_warehouse_deterministic_count():
+    assert len(generate_warehouse()) == 240
+    assert generate_warehouse().equals(generate_warehouse())
+
+
+def test_rotation_boundary_and_missing_dimensions():
+    location = pd.Series({"Bin_Width_cm": 40, "Bin_Height_cm": 30, "Bin_Depth_cm": 20})
+    product = pd.Series({"Width_cm": 30, "Height_cm": 40, "Depth_cm": 20})
+    assert fits_product(product, location, True)
+    assert not fits_product(product, location, False)
+    assert fits_product(pd.Series({"Width_cm": 40, "Height_cm": 30, "Depth_cm": 20}), location)
+    assert not fits_product(pd.Series({"Width_cm": None, "Height_cm": 1, "Depth_cm": 1}), location)
+
+
+def test_affinity_deduplicates_basket():
+    orders = pd.DataFrame({"Order_ID": ["o1", "o1", "o1", "o2"], "SKU_ID": ["a", "a", "b", "a"]})
+    assert compute_affinity(orders).iloc[0].Pair_Count == 1
+
+
+def test_duplicate_assignments_and_unknown_references_are_violations():
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}, {"SKU_ID": "a", "Location_ID": "L1"}, {"SKU_ID": "missing", "Location_ID": "missing-location"}])
+    rules = _rules(layout)
+    assert {"assignment_uniqueness", "location_uniqueness", "sku_reference", "location_reference"} <= rules
+
+
+def test_missing_invalid_data_and_capacity_violations_are_reported():
+    skus = _skus()
+    skus.loc[0, ["Width_cm", "Weight_kg"]] = [0, -1]
+    skus.loc[1, ["Width_cm", "Height_cm", "Depth_cm", "Inventory_Units"]] = [10, 10, 10, 2]
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}, {"SKU_ID": "b", "Location_ID": "L2"}])
+    rules = _rules(layout, skus)
+    assert {"invalid_physical_dimension", "invalid_weight_kg", "bin_volume_capacity", "location_weight_capacity"} <= rules
+
+
+def test_missing_physical_data_is_unverified_not_compliant():
+    skus = _skus()
+    skus.loc[0, ["Width_cm", "Weight_kg"]] = [None, None]
+    result = validate_layout(pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}]), skus, _locations(), CONFIG)
+    unknown = set(result.loc[result.Status == "UNVERIFIED", "Rule"])
+    assert {"missing_physical_dimension", "missing_weight_kg"} <= unknown
+
+
+def test_aggregate_shelf_and_rack_overload_and_ergonomics_are_reported():
+    overloaded = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}, {"SKU_ID": "b", "Location_ID": "L2"}])
+    assert {"aggregate_shelf_load", "aggregate_rack_load"} <= _rules(overloaded)
+    assert "ergonomic_shelf_height" in _rules(pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L3"}]))
+
+
+def test_known_incompatibilities_and_unknown_attributes_are_distinct():
+    skus = _skus()
+    skus.loc[0, ["Category", "Hazard_Class", "Handling_Type"]] = ["food", "OXIDIZER", "HEAT"]
+    skus.loc[1, ["Hazard_Class", "Handling_Type"]] = ["UNSPECIFIED", "UNSPECIFIED"]
+    result = validate_layout(pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}, {"SKU_ID": "b", "Location_ID": "L2"}]), skus, _locations(), CONFIG)
+    assert "configured_incompatibility" in set(result.Rule)
+    assert set(result.loc[result.Status == "UNVERIFIED", "Rule"]) >= {"hazard_class", "handling_type"}
+
+
+def test_empty_and_schema_invalid_allocations():
+    assert validate_layout(pd.DataFrame(), _skus(), _locations(), CONFIG).empty
+    assert "layout_schema" in _rules(pd.DataFrame({"SKU_ID": ["a"]}))
+
+
+def test_baseline_and_optimizer_use_the_same_known_constraint_checks():
+    profile = _skus().copy()
+    locations = _locations()
+    locations[["Shelf_Max_Load_kg", "Rack_Max_Load_kg"]] = 100
+    baseline, excluded = allocate_baseline(profile, locations, CONFIG)
+    optimized, _ = optimize_layout(profile, locations, baseline, pd.DataFrame(), CONFIG)
+    assert excluded.empty
+    for layout in (baseline, optimized):
+        result = validate_layout(layout, profile, locations, CONFIG)
+        assert not (result.Status == "VIOLATION").any()
+
+
+def test_evaluation_arithmetic_zero_distance_and_incomplete_orders():
+    profile, locations = _skus(), _locations()
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    routes = pd.DataFrame({"Distance_m": [0.0, 10.0], "Complete": [True, "false"]})
+    metrics = evaluate(routes, layout, profile, locations, {"walking_speed_m_per_min": 10, "pick_handling_seconds": 0})
+    assert metrics["orders_simulated"] == 2
+    assert metrics["complete_orders"] == 1
+    assert metrics["total_distance_m"] == 10
+    assert metrics["average_distance_m"] == 5
+    assert metrics["allocation_coverage"] == 0.5
+    assert metrics["order_line_coverage"] == 0.6
+    empty_metrics = evaluate(pd.DataFrame(columns=["Distance_m", "Complete"]), layout, profile, locations, {})
+    assert empty_metrics["average_distance_m"] == 0.0
+    comparison = compare({"total_distance_m": 10.0}, {"total_distance_m": 7.5})
+    assert comparison.iloc[0].Change == -2.5

@@ -4,7 +4,7 @@ EPOCH Hackathon project: a constraint-aware warehouse slotting engine that assig
 
 ## Step 1 — Data foundation
 
-This stage sets up reproducible dataset acquisition, schema normalization, and synthetic warehouse topology. EDA, validation, optimization, routing, and dashboard work will be added sequentially after this foundation is reviewed.
+The repository now includes a reproducible prototype pipeline from Olist normalization through demand profiling, feasible baseline allocation, heuristic optimization, route simulation, evaluation, and a Streamlit dashboard.
 
 ### Data sources
 - Orders and product metadata: [Olist Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
@@ -78,10 +78,34 @@ Outputs:
 - Warehouse capacity/zone data is synthetic, and must be treated as configurable simulation inputs.
 - The allocation stage must report infeasible products rather than forcing an unsafe fit.
 
-## Next stages
-1. Review and run this data foundation.
-2. Conduct data-quality checks, demand ABC/Pareto profiling, co-order affinity, and volume EDA.
-3. Build hard-constraint validation and a feasible baseline.
-4. Build demand-/affinity-aware optimization and local search.
-5. Simulate pick routes using identical orders/settings for both layouts.
-6. Build the dashboard and technical documentation.
+## Run the complete pipeline
+
+From the repository root in the project `.venv`:
+
+    .venv\Scripts\python.exe scripts\run_pipeline.py
+
+The runner uses existing local raw data, regenerates normalized and generated outputs deterministically, and writes allocations, routes, violations, comparisons, and reports under `data/processed/` and `reports/`.
+
+Launch the dashboard after the pipeline has completed:
+
+    .venv\Scripts\python.exe -m streamlit run dashboard.py
+
+Run tests with:
+
+    .venv\Scripts\python.exe -m pytest -q
+
+## Method and limitations
+
+The active assortment is configurable in `config/simulation_config.json` and defaults to up to 200 demand-ranked SKUs with usable dimensions and weight. The first prototype models one representative unit per selected SKU; this is not an Olist inventory observation. Quantity remains one recorded order-item line, hazard and handling remain unspecified, and the warehouse topology and capacity ratings are synthetic.
+
+The baseline is deterministic and hard-constraint aware. The optimizer is a feasible greedy reassignment using demand accessibility and ergonomic preferences; it is a heuristic and has no global optimality guarantee. Route distances use a deterministic Manhattan aisle approximation until a measured walkable graph is available. Metrics are generated from actual local inputs and are scoped to the active assortment and simulated route sample.
+
+See `reports/data_foundation_audit.md`, `reports/eda_report.md`, `reports/optimization_report.md`, and `reports/final_validation_report.md` after running the pipeline.
+
+## Constraint-validation evidence
+
+The independent validator treats missing Olist inventory, hazard, and handling information as **UNVERIFIED**, never as safety-compliant. Its representative-stock fallback is explicitly configured in `config/simulation_config.json`; bin, location, shelf, rack, dimension, ergonomic, and configured known-incompatibility checks use this model. The heavy-SKU placement rule is a prototype assumption (over 10 kg must be on shelf level 1 or 2), not a regulatory conclusion. No category or hazard rule is inferred from Olist; documented rules must be added to the configuration before they can be enforced.
+
+Validate the existing saved layouts without regenerating the pipeline:
+
+    .venv\Scripts\python.exe scripts\validate_saved_layouts.py

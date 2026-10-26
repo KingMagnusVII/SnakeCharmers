@@ -1,0 +1,232 @@
+{
+  "raw": {
+    "orders": {
+      "file": "olist_orders_dataset.csv",
+      "rows": 99441,
+      "columns": 8,
+      "key_duplicates": 0,
+      "missing": {
+        "order_approved_at": 160,
+        "order_delivered_carrier_date": 1783,
+        "order_delivered_customer_date": 2965
+      },
+      "dtypes": {
+        "order_id": "object",
+        "customer_id": "object",
+        "order_status": "object",
+        "order_purchase_timestamp": "object",
+        "order_approved_at": "object",
+        "order_delivered_carrier_date": "object",
+        "order_delivered_customer_date": "object",
+        "order_estimated_delivery_date": "object"
+      }
+    },
+    "order_items": {
+      "file": "olist_order_items_dataset.csv",
+      "rows": 112650,
+      "columns": 7,
+      "key_duplicates": null,
+      "missing": {},
+      "dtypes": {
+        "order_id": "object",
+        "order_item_id": "int64",
+        "product_id": "object",
+        "seller_id": "object",
+        "shipping_limit_date": "object",
+        "price": "float64",
+        "freight_value": "float64"
+      }
+    },
+    "products": {
+      "file": "olist_products_dataset.csv",
+      "rows": 32951,
+      "columns": 9,
+      "key_duplicates": 0,
+      "missing": {
+        "product_category_name": 610,
+        "product_name_lenght": 610,
+        "product_description_lenght": 610,
+        "product_photos_qty": 610,
+        "product_weight_g": 2,
+        "product_length_cm": 2,
+        "product_height_cm": 2,
+        "product_width_cm": 2
+      },
+      "dtypes": {
+        "product_id": "object",
+        "product_category_name": "object",
+        "product_name_lenght": "float64",
+        "product_description_lenght": "float64",
+        "product_photos_qty": "float64",
+        "product_weight_g": "float64",
+        "product_length_cm": "float64",
+        "product_height_cm": "float64",
+        "product_width_cm": "float64"
+      }
+    }
+  },
+  "source_quality": {
+    "duplicate_order_item_key": 0,
+    "items_missing_order_reference": 0,
+    "items_missing_product_reference": 0,
+    "missing_order_identifiers": 0,
+    "missing_item_identifiers": 0,
+    "missing_product_identifiers": 0,
+    "invalid_raw_purchase_timestamps": 0,
+    "normalized_line_reconciliation_delta": 0
+  },
+  "demand": {
+    "input_order_lines": 112650,
+    "scoped_order_lines": 110197,
+    "scoped_distinct_orders": 96478,
+    "sku_order_incidence_denominator": 100196,
+    "positive_demand_skus": 32216,
+    "zero_demand_skus": 735,
+    "unmatched_observed_skus": 0,
+    "products_missing_or_invalid_dimensions": 2,
+    "products_missing_or_invalid_weight": 6
+  },
+  "status_distribution": {
+    "delivered": 110197,
+    "shipped": 1185,
+    "canceled": 542,
+    "invoiced": 359,
+    "processing": 357,
+    "unavailable": 7,
+    "approved": 3
+  },
+  "invalid_or_missing_normalized_timestamps": 0,
+  "affinity": {
+    "scope_orders": 96478,
+    "scope_lines": 110197,
+    "min_pair_count": 2,
+    "min_support": 0.0,
+    "retained_pairs": 203,
+    "top_pairs": [
+      {
+        "SKU_A": "36f60d45225e60c7da4558b070ce4b60",
+        "SKU_B": "e53e557d5a159f5aa2c5e995dfdf244b",
+        "Pair_Count": 34,
+        "Support": 0.0003524119488380771,
+        "SKU_A_Support": 0.001140156305064367,
+        "SKU_B_Support": 0.0015962188270901138,
+        "Confidence_A_to_B": 0.3090909090909091,
+        "Confidence_B_to_A": 0.22077922077922077,
+        "Lift": 193.63943329397875
+      },
+      {
+        "SKU_A": "35afc973633aaeb6b877ff57b2793310",
+        "SKU_B": "99a4788cb24856965c36a24e339b6058",
+        "Pair_Count": 29,
+        "Support": 0.00030058666224424223,
+        "SKU_A_Support": 0.0015858537697713468,
+        "SKU_B_Support": 0.004726466137357739,
+        "Confidence_A_to_B": 0.1895424836601307,
+        "Confidence_B_to_A": 0.06359649122807018,
+        "Lift": 40.10236784772389
+      },
+      {
+        "SKU_A": "4fcb3d9a5f4871e8362dfedbdb02b064",
+        "SKU_B": "f4f67ccaece962d013a4e1d7dc3a61f7",
+        "Pair_Count": 17,
+        "Support": 0.00017620597441903854,
+        "SKU_A_Support": 0.0009224901013702606,
+        "SKU_B_Support": 0.0005804432098509505,
+        "Confidence_A_to_B": 0.19101123595505617,
+        "Confidence_B_to_A": 0.30357142857142855,
+        "Lift": 329.07825040128415
+      },
+      {
+        "SKU_A": "36f60d45225e60c7da4558b070ce4b60",
+        "SKU_B": "3f14d740544f37ece8a9e7bc8349797e",
+        "Pair_Count": 12,
+        "Support": 0.00012438068782520367,
+        "SKU_A_Support": 0.001140156305064367,
+        "SKU_B_Support": 0.0008084744708638238,
+        "Confidence_A_to_B": 0.10909090909090909,
+        "Confidence_B_to_A": 0.15384615384615385,
+        "Lift": 134.93426573426572
+      },
+      {
+        "SKU_A": "389d119b48cf3043d311335e499d9c6b",
+        "SKU_B": "422879e10f46682990de24d770e7f83d",
+        "Pair_Count": 11,
+        "Support": 0.0001140156305064367,
+        "SKU_A_Support": 0.0032028027114989945,
+        "SKU_B_Support": 0.0036485001762059746,
+        "Confidence_A_to_B": 0.03559870550161812,
+        "Confidence_B_to_A": 0.03125,
+        "Lift": 9.75707928802589
+      },
+      {
+        "SKU_A": "389d119b48cf3043d311335e499d9c6b",
+        "SKU_B": "53759a2ecddad2bb87a079a1f1519f73",
+        "Pair_Count": 9,
+        "Support": 9.328551586890276e-05,
+        "SKU_A_Support": 0.0032028027114989945,
+        "SKU_B_Support": 0.0029747714504861212,
+        "Confidence_A_to_B": 0.02912621359223301,
+        "Confidence_B_to_A": 0.0313588850174216,
+        "Lift": 9.79107607997023
+      },
+      {
+        "SKU_A": "368c6c730842d78016ad823897a372db",
+        "SKU_B": "53759a2ecddad2bb87a079a1f1519f73",
+        "Pair_Count": 8,
+        "Support": 8.292045855013578e-05,
+        "SKU_A_Support": 0.003016231679761189,
+        "SKU_B_Support": 0.0029747714504861212,
+        "Confidence_A_to_B": 0.027491408934707903,
+        "Confidence_B_to_A": 0.027874564459930314,
+        "Lift": 9.241519690601912
+      },
+      {
+        "SKU_A": "422879e10f46682990de24d770e7f83d",
+        "SKU_B": "53759a2ecddad2bb87a079a1f1519f73",
+        "Pair_Count": 7,
+        "Support": 7.255540123136881e-05,
+        "SKU_A_Support": 0.0036485001762059746,
+        "SKU_B_Support": 0.0029747714504861212,
+        "Confidence_A_to_B": 0.019886363636363636,
+        "Confidence_B_to_A": 0.024390243902439025,
+        "Lift": 6.68500554323725
+      },
+      {
+        "SKU_A": "ad4b5def91ac7c575dbdf65b5be311f4",
+        "SKU_B": "e6b314a2236c162ede1a879f1075430f",
+        "Pair_Count": 6,
+        "Support": 6.219034391260183e-05,
+        "SKU_A_Support": 9.328551586890276e-05,
+        "SKU_B_Support": 9.328551586890276e-05,
+        "Confidence_A_to_B": 0.6666666666666666,
+        "Confidence_B_to_A": 0.6666666666666666,
+        "Lift": 7146.518518518518
+      },
+      {
+        "SKU_A": "946344697156947d846d27fe0d503033",
+        "SKU_B": "ad0a798e7941f3a5a2fb8139cb62ad78",
+        "Pair_Count": 6,
+        "Support": 6.219034391260183e-05,
+        "SKU_A_Support": 0.0001554758597815046,
+        "SKU_B_Support": 0.00012438068782520367,
+        "Confidence_A_to_B": 0.4,
+        "Confidence_B_to_A": 0.5,
+        "Lift": 3215.933333333334
+      }
+    ]
+  },
+  "fit": {
+    "valid_dimension_products": 32949,
+    "metadata_indeterminate": 2,
+    "no_fit": 8533,
+    "small_fit_count_lte_5": 0,
+    "location_count": 240,
+    "location_dimensions_cm": [
+      {
+        "Bin_Width_cm": 40.0,
+        "Bin_Height_cm": 30.0,
+        "Bin_Depth_cm": 40.0
+      }
+    ]
+  }
+}
