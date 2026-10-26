@@ -1,0 +1,17 @@
+{
+  "description": "Synthetic topology for a prototype; replace with measured warehouse data when available.",
+  "aisles": 6,
+  "rack_sides_per_aisle": ["L", "R"],
+  "bays_per_rack": 5,
+  "shelf_levels_per_rack": 4,
+  "aisle_spacing_m": 3.0,
+  "bay_spacing_m": 1.2,
+  "first_aisle_x_m": 3.0,
+  "first_bay_y_m": 2.0,
+  "dispatch_depot": {"x_m": 0.0, "y_m": 0.0, "z_m": 0.0},
+  "bin_dimensions_cm": {"width": 40.0, "height": 30.0, "depth": 40.0},
+  "location_weight_capacity_by_level_kg": {"1": 40.0, "2": 35.0, "3": 30.0, "4": 20.0},
+  "shelf_max_load_kg": 200.0,
+  "rack_max_load_kg": 700.0,
+  "zone_aisle_ranges": {"A": [1, 2], "B": [3, 4], "C": [5, 6]}
+}
