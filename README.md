@@ -26,7 +26,7 @@ py -m venv .venv
 
 ## Input data
 
-The pipeline uses the public [Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Raw files are not committed to Git. Download/prepare the data using the scripts in `scripts/` and follow any Kaggle access/credential requirements. The pipeline expects the raw CSV files in `data/raw/`.
+The pipeline uses the public [Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Raw files are not committed to Git. From the repository root, run the following if `data/raw/` does not already contain the required CSVs:\n\n```powershell\n.venv\\Scripts\\python.exe -m scripts.download_olist\n.venv\\Scripts\\python.exe -m scripts.prepare_data\n```\n\nThe download step requires Kaggle access, acceptance of dataset terms, and API credentials. The pipeline expects the raw CSV files in `data/raw/`.
 
 **Data limitations that must remain explicit:**
 - Olist order items do not supply a dependable explicit quantity field, so recorded order-item lines are used as a demand proxy.
