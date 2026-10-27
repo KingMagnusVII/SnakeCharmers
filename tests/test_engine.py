@@ -51,6 +51,19 @@ def test_rotation_boundary_and_missing_dimensions():
     assert fits_product(pd.Series({"Width_cm": 40, "Height_cm": 30, "Depth_cm": 20}), location)
     assert not fits_product(pd.Series({"Width_cm": None, "Height_cm": 1, "Depth_cm": 1}), location)
 
+def test_missing_bin_dimension_is_unverified_but_nonpositive_is_violation():
+    skus = _skus()
+    layout = pd.DataFrame([{"SKU_ID": "b", "Location_ID": "L1"}])
+    locations = _locations()
+    locations.loc[0, "Bin_Depth_cm"] = None
+    missing_result = validate_layout(layout, skus, locations, CONFIG)
+    assert "missing_bin_dimension" in set(missing_result.loc[missing_result.Status == "UNVERIFIED", "Rule"])
+    assert "dimensional_fit" not in set(missing_result.loc[missing_result.Status == "VIOLATION", "Rule"])
+
+    locations.loc[0, "Bin_Depth_cm"] = 0
+    invalid_result = validate_layout(layout, skus, locations, CONFIG)
+    assert "invalid_bin_dimension" in set(invalid_result.loc[invalid_result.Status == "VIOLATION", "Rule"])
+
 
 def test_affinity_deduplicates_basket():
     orders = pd.DataFrame({"Order_ID": ["o1", "o1", "o1", "o2"], "SKU_ID": ["a", "a", "b", "a"]})
