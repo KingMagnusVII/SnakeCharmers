@@ -57,7 +57,10 @@ def fits_product(product: pd.Series, location: pd.Series, allow_rotations: bool 
 def _stock_units(product: pd.Series, config: Mapping[str, Any]) -> tuple[float | None, bool, str | None]:
     units = _number(product.get("Inventory_Units"))
     if units is None:
-        return _number(config.get("representative_inventory_units", 1)), True, "Observed inventory is unavailable; representative-stock assumption is used."
+        fallback = _number(config.get("representative_inventory_units", 1))
+        if fallback is None or fallback <= 0:
+            return None, False, "Configured representative_inventory_units must be a positive numeric value."
+        return fallback, True, "Observed inventory is unavailable; representative-stock assumption is used."
     if units <= 0:
         return None, False, "Inventory units must be positive when provided."
     return units, False, None
@@ -90,12 +93,25 @@ def product_location_results(product: pd.Series, location: pd.Series, config: Ma
         results.append(_result(sku, location_id, "missing_weight_kg", "UNVERIFIED", "Weight_kg", "positive numeric value", "Weight-dependent checks cannot be fully verified."))
     elif weight <= 0:
         results.append(_result(sku, location_id, "invalid_weight_kg", "VIOLATION", weight, "> 0", "Product weight must be positive."))
-    if dims is not None and not fits_product(product, location, bool(config.get("allow_rotations", True))):
-        results.append(_result(sku, location_id, "dimensional_fit", "VIOLATION", dims, [location.get("Bin_Width_cm"), location.get("Bin_Height_cm"), location.get("Bin_Depth_cm")], "No permitted orientation fits this bin."))
+    bin_columns = ("Bin_Width_cm", "Bin_Height_cm", "Bin_Depth_cm")
+    bin_dimensions = [_number(location.get(column)) for column in bin_columns]
+    if dims is not None:
+        missing_bin_dimensions = [column for column, value in zip(bin_columns, bin_dimensions) if value is None]
+        invalid_bin_dimensions = {column: value for column, value in zip(bin_columns, bin_dimensions) if value is not None and value <= 0}
+        if missing_bin_dimensions:
+            results.append(_result(sku, location_id, "missing_bin_dimension", "UNVERIFIED", missing_bin_dimensions, "positive numeric values", "Bin dimensions are incomplete; dimensional fit cannot be verified."))
+        if invalid_bin_dimensions:
+            results.append(_result(sku, location_id, "invalid_bin_dimension", "VIOLATION", invalid_bin_dimensions, "> 0", "Bin dimensions must be positive."))
+        if not missing_bin_dimensions and not invalid_bin_dimensions and not fits_product(product, location, bool(config.get("allow_rotations", True))):
+            results.append(_result(sku, location_id, "dimensional_fit", "VIOLATION", dims, bin_dimensions, "No permitted orientation fits this bin."))
 
     units, assumed_units, unit_note = _stock_units(product, config)
     if units is None:
-        results.append(_result(sku, location_id, "invalid_inventory_units", "VIOLATION", product.get("Inventory_Units"), "> 0", unit_note or "Invalid inventory units."))
+        inventory_value = product.get("Inventory_Units")
+        missing_inventory = _number(inventory_value) is None
+        rule = "invalid_representative_inventory_units" if missing_inventory else "invalid_inventory_units"
+        measured = config.get("representative_inventory_units", 1) if missing_inventory else inventory_value
+        results.append(_result(sku, location_id, rule, "VIOLATION", measured, "> 0", unit_note or "Inventory units must be positive."))
     else:
         if assumed_units:
             results.append(_result(sku, location_id, "inventory_units", "UNVERIFIED", "missing", units, unit_note or ""))

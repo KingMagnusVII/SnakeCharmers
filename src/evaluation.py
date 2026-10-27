@@ -54,6 +54,31 @@ def evaluate(routes, layout, profile, locations, config):
     # Keep only warehouse locations used by the supplied layout.
     selected = locations[locations.Location_ID.isin(layout.Location_ID)]
 
+    # Preserve catalog-wide coverage, but also measure the configured active
+    # assortment that the allocator is actually asked to place.
+    max_active_skus = int(config.get("max_active_skus", 200))
+    active_fields = {"SKU_ID", "Physical_Metadata_Usable", "Recorded_Order_Lines"}
+    if active_fields.issubset(profile.columns):
+        active_profile = (
+            profile.loc[profile["Physical_Metadata_Usable"].fillna(False).astype(bool)]
+            .sort_values(
+                ["Recorded_Order_Lines", "SKU_ID"],
+                ascending=[False, True],
+                kind="mergesort",
+            )
+            .head(max_active_skus)
+        )
+    else:
+        # Keep evaluation usable for small legacy/test profiles without metadata.
+        active_profile = profile.head(max_active_skus)
+    active_sku_ids = set(active_profile["SKU_ID"])
+    active_assortment_count = len(active_sku_ids)
+    allocated_active_count = (
+        layout.loc[layout["SKU_ID"].isin(active_sku_ids), "SKU_ID"].nunique()
+        if "SKU_ID" in layout.columns
+        else 0
+    )
+
     # Keep only profile rows represented in the layout.
     profile_rows = profile[profile.SKU_ID.isin(layout.SKU_ID)]
 
@@ -68,6 +93,11 @@ def evaluate(routes, layout, profile, locations, config):
 
     # Count recorded demand lines represented by the whole profile.
     order_lines = float(profile.Recorded_Order_Lines.sum())
+
+    # Missing product attributes remain visible as data-quality limitations.
+    unknown_hazard = profile_rows["Hazard_Class"].isna() | profile_rows["Hazard_Class"].astype(str).str.strip().str.upper().isin(["", "UNSPECIFIED", "UNKNOWN"])
+    unknown_handling = profile_rows["Handling_Type"].isna() | profile_rows["Handling_Type"].astype(str).str.strip().str.upper().isin(["", "UNSPECIFIED", "UNKNOWN"])
+    unknown_inventory = pd.to_numeric(profile_rows["Inventory_Units"], errors="coerce").isna()
 
     # Return all metrics in one dictionary for report generation.
     return {
@@ -96,15 +126,27 @@ def evaluate(routes, layout, profile, locations, config):
         "allocated_bin_utilization": (
             used / selected_capacity if selected_capacity else 0.0
         ),
+        # Catalog-wide coverage is retained for context; these metrics show
+        # coverage of the configured active assortment the allocator targets.
         "allocation_coverage": len(layout) / len(profile) if len(profile) else 0.0,
+        "active_assortment_sku_count": int(active_assortment_count),
+        "active_assortment_allocated_sku_count": int(allocated_active_count),
+        "active_assortment_unallocated_sku_count": int(
+            max(active_assortment_count - allocated_active_count, 0)
+        ),
+        "active_assortment_coverage": (
+            allocated_active_count / active_assortment_count
+            if active_assortment_count
+            else 0.0
+        ),
         "order_line_coverage": (
             float(profile_rows.Recorded_Order_Lines.sum()) / order_lines
             if order_lines
             else 0.0
         ),
-        "unknown_hazard_attributes": int(
-            (profile_rows.Hazard_Class == "UNSPECIFIED").sum()
-        ),
+        "unknown_hazard_attributes": int(unknown_hazard.sum()),
+        "unknown_handling_attributes": int(unknown_handling.sum()),
+        "unknown_inventory_attributes": int(unknown_inventory.sum()),
     }
 
 

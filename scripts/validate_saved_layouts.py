@@ -43,7 +43,11 @@ def main() -> None:
         validation.loc[validation.Rule.isin(["sku_reference", "location_reference"])].to_csv(reports / f"{name}_unknown_references.csv", index=False)
         aggregate_loads(layout, skus, locations, config).to_csv(reports / f"{name}_aggregate_loads.csv", index=False)
         summary.append({"layout": name, "assignments": len(layout), "known_violations": int((validation.Status == "VIOLATION").sum()), "unverified_checks": int((validation.Status == "UNVERIFIED").sum()), "unknown_references": int(validation.Rule.isin(["sku_reference", "location_reference"]).sum())})
-    unallocated = pd.read_csv(processed / "unallocated_skus.csv")
+    try:
+        unallocated = pd.read_csv(processed / "unallocated_skus.csv")
+    except pd.errors.EmptyDataError:
+        # Older pipeline runs may have written a zero-byte CSV when no SKUs were excluded.
+        unallocated = pd.DataFrame(columns=["SKU_ID", "Reason"])
     unallocated.to_csv(reports / "unallocated_or_infeasible_skus.csv", index=False)
     headers = list(summary[0])
     table = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]

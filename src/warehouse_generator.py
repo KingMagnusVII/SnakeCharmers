@@ -19,13 +19,20 @@ def generate_warehouse(config_path: Path = DEFAULT_CONFIG) -> pd.DataFrame:
 
     # Extract the main geometry and capacity settings.
     depot = config["dispatch_depot"]
-    dims = config["bin_dimensions_cm"]
+    default_dims = config["bin_dimensions_cm"]
+    level_dims = config.get("bin_dimensions_by_level", {})
     levels = int(config["shelf_levels_per_rack"])
     bays = int(config["bays_per_rack"])
     zone_ranges = config["zone_aisle_ranges"]
 
-    # Compute the volume of one configured bin.
-    volume = float(dims["width"]) * float(dims["height"]) * float(dims["depth"])
+    def dimensions_for_level(level: int) -> dict[str, float]:
+        """Return the configured bin dimensions for a shelf level."""
+        dims = level_dims.get(str(level), default_dims)
+        return {
+            "width": float(dims["width"]),
+            "height": float(dims["height"]),
+            "depth": float(dims["depth"]),
+        }
 
     def zone_for(aisle: int) -> str:
         """Return the configured zone containing an aisle."""
@@ -63,6 +70,8 @@ def generate_warehouse(config_path: Path = DEFAULT_CONFIG) -> pd.DataFrame:
                 for level in range(1, levels + 1):
                     # Model shelf height using the configured level spacing.
                     z = 0.35 + (level - 1) * 0.75
+                    dims = dimensions_for_level(level)
+                    volume = dims["width"] * dims["height"] * dims["depth"]
 
                     # Append all metadata needed by allocation and validation.
                     rows.append(
@@ -76,9 +85,9 @@ def generate_warehouse(config_path: Path = DEFAULT_CONFIG) -> pd.DataFrame:
                             "X_m": round(x, 3),
                             "Y_m": round(y, 3),
                             "Z_m": round(z, 3),
-                            "Bin_Width_cm": float(dims["width"]),
-                            "Bin_Height_cm": float(dims["height"]),
-                            "Bin_Depth_cm": float(dims["depth"]),
+                            "Bin_Width_cm": dims["width"],
+                            "Bin_Height_cm": dims["height"],
+                            "Bin_Depth_cm": dims["depth"],
                             "Volumetric_Capacity_cm3": round(volume, 2),
                             "Max_Weight_Capacity_kg": float(
                                 config["location_weight_capacity_by_level_kg"][str(level)]
@@ -93,6 +102,47 @@ def generate_warehouse(config_path: Path = DEFAULT_CONFIG) -> pd.DataFrame:
                             ),
                         }
                     )
+
+    # Add explicitly configured oversized slots in a separate storage zone.
+    # Each slot has its own rack so aggregate rack-load checks remain independent.
+    for slot in config.get("oversized_storage_locations", []):
+        dims = {
+            "width": float(slot["dimensions_cm"]["width"]),
+            "height": float(slot["dimensions_cm"]["height"]),
+            "depth": float(slot["dimensions_cm"]["depth"]),
+        }
+        x = float(slot["x_m"])
+        y = float(slot["y_m"])
+        volume = dims["width"] * dims["height"] * dims["depth"]
+        rows.append(
+            {
+                "Location_ID": str(slot["location_id"]),
+                "Zone": "OVERSIZED",
+                "Aisle_Number": None,
+                "Rack_ID": str(slot["rack_id"]),
+                "Bay": 1,
+                "Shelf_Level": 1,
+                "X_m": round(x, 3),
+                "Y_m": round(y, 3),
+                "Z_m": float(slot.get("z_m", 0.35)),
+                "Bin_Width_cm": dims["width"],
+                "Bin_Height_cm": dims["height"],
+                "Bin_Depth_cm": dims["depth"],
+                "Volumetric_Capacity_cm3": round(volume, 2),
+                "Max_Weight_Capacity_kg": float(slot["max_weight_capacity_kg"]),
+                "Shelf_Max_Load_kg": float(slot.get("shelf_max_load_kg", config["shelf_max_load_kg"])),
+                "Rack_Max_Load_kg": float(slot.get("rack_max_load_kg", config["rack_max_load_kg"])),
+                "Distance_to_Dispatch_Depot_m": round(
+                    abs(x - float(depot["x_m"])) + abs(y - float(depot["y_m"])),
+                    2,
+                ),
+                "Location_Type": "OVERSIZED",
+            }
+        )
+
+    # Mark ordinary bins explicitly so allocators can reserve oversized slots.
+    for row in rows:
+        row.setdefault("Location_Type", "STANDARD")
 
     # Convert all generated locations into a DataFrame.
     result = pd.DataFrame(rows)

@@ -1,26 +1,23 @@
 """Run the complete reproducible prototype pipeline."""
 
-from __future__ import annotations  # Enables modern type annotations.
+from __future__ import annotations
 
-import json  # Reads the simulation configuration and writes JSON reports.
-import sys  # Lets the script import the project package when run directly.
-import time  # Measures end-to-end pipeline runtime.
-from pathlib import Path  # Provides cross-platform filesystem paths.
+import json
+import sys
+import time
+from pathlib import Path
 
-# Resolve the repository root from this script's location.
 ROOT = Path(__file__).resolve().parents[1]
-
-# Make the repository root importable when this file is executed directly.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Import each stage of the warehouse-slotting pipeline.
 from src.affinity_analysis import compute_affinity
 from src.baseline import allocate_baseline, select_feasible_candidates
 from src.data_loader import load_olist_raw, normalize_olist
 from src.demand_analysis import analyze_demand
 from src.evaluation import compare, evaluate
 from src.feasibility import validate_layout
+from src.ml_demand import forecast_next_week_demand
 from src.optimizer import improve_layout_by_route_distance, optimize_layout
 from src.routing import route_orders
 from src.warehouse_generator import generate_warehouse
@@ -80,52 +77,71 @@ def optimize_and_refine_layout(profile, locations, baseline, affinity, scoped, c
     return optimized, opt_info
 
 
+def _validation_summary(results):
+    """Separate confirmed violations from checks that remain unverified."""
+    if "Status" not in results.columns:
+        return {"known_violations": 0, "unverified_checks": 0}
+    return {
+        "known_violations": int((results["Status"] == "VIOLATION").sum()),
+        "unverified_checks": int((results["Status"] == "UNVERIFIED").sum()),
+    }
+
+
 def main() -> None:
-    """Run every pipeline stage and save its outputs and reports."""
-
-    # Start a high-resolution timer so runtime can be included in the final report.
+    """Run every stage of the warehouse-slotting pipeline."""
     start = time.perf_counter()
-
-    # Define output directories and create them if they do not already exist.
     out = ROOT / "data" / "processed"
     reports = ROOT / "reports"
     out.mkdir(exist_ok=True)
     reports.mkdir(exist_ok=True)
 
-    # Load the simulation settings from the JSON configuration file.
     config = json.loads(
         (ROOT / "config" / "simulation_config.json").read_text(encoding="utf-8")
     )
-
-    # Load the raw Olist tables from data/raw.
     tables = load_olist_raw(ROOT / "data" / "raw")
-
-    # Convert raw Olist schemas into the project's normalized order and SKU tables.
     orders, skus = normalize_olist(tables)
-
-    # Generate the deterministic synthetic warehouse topology.
     locations = generate_warehouse()
 
-    # Persist the normalized inputs so later stages can inspect/reuse them.
     orders.to_csv(out / "orders.csv", index=False)
     skus.to_csv(out / "sku_master.csv", index=False)
     locations.to_csv(out / "warehouse_locations.csv", index=False)
 
-    # Build the demand profile and collect data-quality information.
     profile, quality = analyze_demand(orders, skus, config)
-    profile.to_csv(out / "demand_profile.csv", index=False)
 
-    # Restrict historical demand to the order statuses configured for the simulation.
+    # Stage 10: learn temporal demand patterns and forecast the next week.
+    profile, ml_info = forecast_next_week_demand(orders, profile, config)
+    profile.to_csv(out / "demand_profile.csv", index=False)
+    profile.to_csv(out / "ml_demand_forecast.csv", index=False)
+
     scoped = orders[orders.Order_Status.isin(config["demand_statuses"])]
 
-    # Select demand-ranked SKUs that fit at least one location before capping.
-    active = set(select_feasible_candidates(profile, locations, config).SKU_ID)
-
-    # Calculate SKU-pair co-occurrence for the active assortment.
-    affinity = compute_affinity(scoped, active)
-
-    # Create the deterministic baseline allocation and record excluded SKUs.
+    # Build the historical baseline first. This keeps the benchmark independent
+    # of ML so the final evaluation can show whether ML actually improves it.
     baseline, excluded = allocate_baseline(profile, locations, config)
+
+    # Diagnose every active SKU that could not be allocated. This makes it clear
+    # whether the bottleneck is physical dimensions or remaining constraints.
+    excluded.to_csv(out / "unallocated_skus.csv", index=False)
+    reason_summary = (
+        excluded["Reason"]
+        .value_counts()
+        .rename_axis("Reason")
+        .reset_index(name="SKU_Count")
+        if not excluded.empty
+        else __import__("pandas").DataFrame(columns=["Reason", "SKU_Count"])
+    )
+    reason_summary["Share_of_Unallocated"] = (
+        reason_summary["SKU_Count"] / len(excluded)
+        if len(excluded)
+        else 0.0
+    )
+    reason_summary.to_csv(out / "unallocated_reason_summary.csv", index=False)
+
+    # Use the exact baseline assortment for affinity analysis so both strategies
+    # are compared on the same SKUs. The optimizer then uses ML demand priority
+    # when deciding which of those SKUs gets the best feasible locations.
+    active = set(baseline.SKU_ID)
+    affinity = compute_affinity(scoped, active)
 
     # Improve the baseline using the project's feasible greedy heuristic,
     # followed by bounded route-distance local search.
@@ -138,65 +154,44 @@ def main() -> None:
         config,
     )
 
-    # Persist both layouts and the SKUs that were not allocated.
     baseline.to_csv(out / "baseline_allocation.csv", index=False)
     optimized.to_csv(out / "optimized_allocation.csv", index=False)
-    excluded.to_csv(out / "unallocated_skus.csv", index=False)
 
-    # Independently validate both layouts against physical and safety constraints.
     baseline_violations = validate_layout(
-        baseline,
-        skus,
-        locations,
-        config["allow_rotations"],
+        baseline, skus, locations, config["allow_rotations"]
     )
     optimized_violations = validate_layout(
-        optimized,
-        skus,
-        locations,
-        config["allow_rotations"],
+        optimized, skus, locations, config["allow_rotations"]
     )
-
-    # Save validation findings for downstream reports/dashboard use.
     baseline_violations.to_csv(out / "baseline_violations.csv", index=False)
     optimized_violations.to_csv(out / "optimized_violations.csv", index=False)
+    baseline_validation = _validation_summary(baseline_violations)
+    optimized_validation = _validation_summary(optimized_violations)
 
-    # Generate pick routes for both layouts using the same demand scope.
     baseline_routes = route_orders(scoped, baseline, locations)
     optimized_routes = route_orders(scoped, optimized, locations)
     baseline_routes.to_csv(out / "baseline_routes.csv", index=False)
     optimized_routes.to_csv(out / "optimized_routes.csv", index=False)
 
-    # Calculate metrics for both layouts and compare them.
     baseline_metrics = evaluate(
-        baseline_routes,
-        baseline,
-        profile,
-        locations,
-        config,
+        baseline_routes, baseline, profile, locations, config
     )
     optimized_metrics = evaluate(
-        optimized_routes,
-        optimized,
-        profile,
-        locations,
-        config,
+        optimized_routes, optimized, profile, locations, config
     )
     comparison = compare(baseline_metrics, optimized_metrics)
     comparison.to_csv(out / "evaluation_comparison.csv", index=False)
 
-    # Write a short audit report describing the data foundation.
     (reports / "data_foundation_audit.md").write_text(
         "# Data foundation audit\n\n"
-        "Verified raw tables, normalized schemas, 240 generated locations, "
-        "and deterministic inputs.\n\n"
+        "Verified raw tables, normalized schemas, "
+        f"{len(locations)} generated warehouse locations, and deterministic inputs.\n\n"
         "```json\n"
         + json.dumps(quality, indent=2, default=str)
         + "\n```\n",
         encoding="utf-8",
     )
 
-    # Write the EDA summary report using the same quality metadata.
     (reports / "eda_report.md").write_text(
         "# EDA report\n\n"
         "Demand scope: delivered orders. Quantity is a recorded order-line "
@@ -206,19 +201,70 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    # Record the optimizer's heuristic metadata and its limitations.
+    (reports / "ml_demand_report.md").write_text(
+        "# ML demand forecasting report\n\n"
+        "The model predicts next-week SKU demand from temporal lag/rolling "
+        "features, historical demand, and product category.\n\n"
+        + json.dumps(ml_info, indent=2, default=str)
+        + "\n\n"
+        "The forecast is used by the optimized allocator as a priority signal: "
+        "higher predicted-demand SKUs are considered first for the best feasible "
+        "locations. The historical baseline remains unchanged for comparison.\n",
+        encoding="utf-8",
+    )
+
     (reports / "optimization_report.md").write_text(
         "# Optimization report\n\n"
-        "Heuristic feasible reassignment; no global optimality claim.\n\n"
+        "Heuristic feasible reassignment using ML demand priority, warehouse "
+        "distance, ergonomics, and order affinity; no global optimality claim.\n\n"
         + json.dumps(opt_info, indent=2)
         + "\n",
         encoding="utf-8",
     )
 
-    # Save the final comparison table and measured runtime.
+    # Explain why active-assortment SKUs remain unallocated so the next
+    # optimization step can target the real bottleneck instead of guessing.
+    reason_lines = [
+        "# Unallocated SKU diagnosis",
+        "",
+        f"Active assortment: {len(baseline) + len(excluded)} SKUs.",
+        f"Allocated: {len(baseline)} SKUs.",
+        f"Unallocated: {len(excluded)} SKUs.",
+        "",
+        "| Reason | SKU count | Share of unallocated |",
+        "|---|---:|---:|",
+    ]
+    if reason_summary.empty:
+        reason_lines.append("| None | 0 | 0.0% |")
+    else:
+        for _, row in reason_summary.iterrows():
+            reason_lines.append(
+                f"| {row['Reason']} | {int(row['SKU_Count'])} | "
+                f"{row['Share_of_Unallocated']:.1%} |"
+            )
+    reason_lines.extend(
+        [
+            "",
+            "Interpretation:",
+            "- `does_not_fit_any_bin_dimensions` means the SKU cannot physically fit in any generated bin, even with allowed rotation.",
+            "- `no_remaining_feasible_location` means at least one bin is dimensionally suitable, but all such locations were unavailable or violated another hard constraint when the SKU was considered.",
+        ]
+    )
+    (reports / "unallocated_sku_diagnosis.md").write_text(
+        "\n".join(reason_lines) + "\n",
+        encoding="utf-8",
+    )
+
     runtime_seconds = round(time.perf_counter() - start, 2)
     (reports / "final_validation_report.md").write_text(
         "# Final validation report\n\n"
+        "Confirmed constraint violations and unverified checks are counted separately. "
+        "UNVERIFIED means source data is missing or unknown; it is not evidence of compliance.\n\n"
+        "| Layout | Confirmed violations | Unverified checks |\n"
+        "|---|---:|---:|\n"
+        f"| Baseline | {baseline_validation['known_violations']} | {baseline_validation['unverified_checks']} |\n"
+        f"| Optimized | {optimized_validation['known_violations']} | {optimized_validation['unverified_checks']} |\n\n"
+        "Evaluation metrics:\n\n"
         "```text\n"
         + comparison.to_string(index=False)
         + "\n```\n\n"
@@ -226,14 +272,18 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    # Print a machine-readable summary for terminals and automation.
     print(
         json.dumps(
             {
                 "baseline": baseline_metrics,
                 "optimized": optimized_metrics,
-                "baseline_violations": len(baseline_violations),
-                "optimized_violations": len(optimized_violations),
+                "baseline_violations": baseline_validation["known_violations"],
+                "baseline_unverified_checks": baseline_validation["unverified_checks"],
+                "optimized_violations": optimized_validation["known_violations"],
+                "optimized_unverified_checks": optimized_validation["unverified_checks"],
+                "unallocated_reason_counts": reason_summary.set_index("Reason")["SKU_Count"].to_dict(),
+                "ml_demand": ml_info,
+                "optimization": opt_info,
                 "runtime_seconds": runtime_seconds,
             },
             indent=2,
@@ -241,6 +291,5 @@ def main() -> None:
     )
 
 
-# Run the pipeline when this file is executed as a script/module entry point.
 if __name__ == "__main__":
     main()

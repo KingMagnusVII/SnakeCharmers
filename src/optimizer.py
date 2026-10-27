@@ -1,217 +1,191 @@
-"""Demand-aware feasible improvement over the deterministic baseline."""
+"""Affinity-aware feasible improvement over the deterministic baseline."""
 from __future__ import annotations  # Enables modern type annotations.
 
-from collections import defaultdict
+import math  # Provides stable logarithmic affinity weighting.
 
 import pandas as pd  # Provides DataFrame operations.
 
-from .feasibility import is_product_location_feasible, validate_layout  # Reuses placement constraints.
-from .routing import route_orders  # Measures the project's deterministic route distance.
+from .feasibility import fits_product, is_product_location_feasible, validate_layout
+from .routing import route_orders
 
 
-def _objective_weights(config):
-    """Read the configured objective weights with safe zero defaults."""
+def _affinity_index(affinity: pd.DataFrame) -> dict[str, list[tuple[str, float]]]:
+    """Build a symmetric SKU -> (related SKU, strength) lookup from affinity data."""
 
-    configured = config.get("objective_weights", {}) or {}
-    return {
-        name: float(configured.get(name, default))
-        for name, default in {
-            "distance": 1.0,
-            "affinity": 0.0,
-            "ergonomic": 0.0,
-            "waste": 0.0,
-        }.items()
-    }
+    if affinity.empty:
+        return {}
 
+    required = {"SKU_A", "SKU_B", "Pair_Count", "Lift"}
+    if not required.issubset(affinity.columns):
+        return {}
 
-def _affinity_neighbors(affinity):
-    """Build an undirected SKU graph weighted by observed pair counts."""
-
-    neighbors = defaultdict(list)
-    required = {"SKU_A", "SKU_B", "Pair_Count"}
-    if affinity is None or affinity.empty or not required <= set(affinity.columns):
-        return neighbors
-
+    index: dict[str, list[tuple[str, float]]] = {}
     for row in affinity.itertuples(index=False):
-        pair_count = pd.to_numeric(getattr(row, "Pair_Count"), errors="coerce")
-        if pd.isna(pair_count) or pair_count <= 0:
+        try:
+            pair_count = float(row.Pair_Count)
+            lift = float(row.Lift)
+        except (TypeError, ValueError):
             continue
-        sku_a, sku_b = getattr(row, "SKU_A"), getattr(row, "SKU_B")
-        if pd.isna(sku_a) or pd.isna(sku_b) or sku_a == sku_b:
+
+        if pair_count <= 0 or not math.isfinite(lift) or lift <= 0:
             continue
-        neighbors[sku_a].append((sku_b, float(pair_count)))
-        neighbors[sku_b].append((sku_a, float(pair_count)))
-    return neighbors
+
+        # Log scaling prevents a single very large lift from dominating the score.
+        strength = math.log1p(pair_count) * math.log1p(lift)
+        index.setdefault(row.SKU_A, []).append((row.SKU_B, strength))
+        index.setdefault(row.SKU_B, []).append((row.SKU_A, strength))
+
+    return index
 
 
-def _min_max_scale(values):
-    """Scale a numeric series to 0..1, using zero for a constant series."""
+def _affinity_score(
+    sku: str,
+    candidate: pd.Series,
+    placed_locations: dict[str, pd.Series],
+    affinity_index: dict[str, list[tuple[str, float]]],
+    max_distance: float,
+) -> float:
+    """Return normalized affinity to already-placed related SKUs.
 
-    values = pd.to_numeric(values, errors="coerce").fillna(0.0)
-    minimum, maximum = float(values.min()), float(values.max())
-    if maximum <= minimum:
-        return pd.Series(0.0, index=values.index)
-    return (values - minimum) / (maximum - minimum)
+    A related SKU scores highest when it is already close to the candidate bin.
+    """
 
+    related = affinity_index.get(sku, [])
+    if not related or max_distance <= 0:
+        return 0.0
 
-def _coordinate_distance(first, second):
-    """Use the project's Manhattan coordinate convention."""
+    weighted_proximity = 0.0
+    total_strength = 0.0
+    for other_sku, strength in related:
+        other = placed_locations.get(other_sku)
+        if other is None:
+            continue
 
-    return abs(float(first.X_m) - float(second.X_m)) + abs(
-        float(first.Y_m) - float(second.Y_m)
-    )
-
-
-def _affinity_costs(product_sku, candidates, used_locations, neighbors):
-    """Return normalized proximity costs to already placed affinity neighbors."""
-
-    linked = [
-        (sku, strength)
-        for sku, strength in neighbors.get(product_sku, [])
-        if sku in used_locations
-    ]
-    if not linked:
-        return pd.Series(0.0, index=candidates.index)
-
-    distances = []
-    for _, candidate in candidates.iterrows():
-        weighted_distance = 0.0
-        total_strength = 0.0
-        for neighbor_sku, strength in linked:
-            weighted_distance += strength * _coordinate_distance(
-                candidate,
-                used_locations[neighbor_sku],
-            )
-            total_strength += strength
-        distances.append(weighted_distance / total_strength)
-    return _min_max_scale(pd.Series(distances, index=candidates.index))
-
-
-def _score_candidates(
-    product_sku,
-    product,
-    candidates,
-    used_locations,
-    neighbors,
-    config,
-):
-    """Score feasible candidates as a weighted sum of normalized costs."""
-
-    weights = _objective_weights(config)
-    scored = candidates.copy()
-    scored["distance_cost"] = _min_max_scale(
-        scored["Distance_to_Dispatch_Depot_m"]
-    )
-    scored["affinity_cost"] = _affinity_costs(
-        product_sku,
-        scored,
-        used_locations,
-        neighbors,
-    )
-
-    threshold = float(
-        (config.get("ergonomics", {}) or {}).get("heavy_sku_weight_kg", 10.0)
-    )
-    maximum_level = max(float(scored["Shelf_Level"].max()), 1.0)
-    weight = float(pd.to_numeric(product.Weight_kg, errors="coerce"))
-    scored["ergonomic_cost"] = (
-        scored["Shelf_Level"] / maximum_level if weight > threshold else 0.0
-    )
-
-    product_volume = pd.to_numeric(
-        product.get("Volume_cm3"), errors="coerce"
-    )
-    if pd.isna(product_volume):
-        product_volume = (
-            float(product.Width_cm)
-            * float(product.Height_cm)
-            * float(product.Depth_cm)
+        distance = abs(float(candidate["X_m"]) - float(other["X_m"])) + abs(
+            float(candidate["Y_m"]) - float(other["Y_m"])
         )
-    capacity = pd.to_numeric(
-        scored["Volumetric_Capacity_cm3"], errors="coerce"
-    )
-    scored["waste_cost"] = (1.0 - product_volume / capacity).clip(0.0, 1.0).fillna(0.0)
-    scored["score"] = sum(
-        weights[name] * scored[f"{name}_cost"]
-        for name in ("distance", "affinity", "ergonomic", "waste")
-    )
-    return scored
+        proximity = max(0.0, 1.0 - distance / max_distance)
+        weighted_proximity += strength * proximity
+        total_strength += strength
+
+    if total_strength == 0:
+        return 0.0
+    return weighted_proximity / total_strength
 
 
 def optimize_layout(profile, locations, baseline, affinity, config):
-    """Greedily reassign each baseline SKU to a weighted feasible location."""
+    """Greedily reassign each SKU to a feasible location using ML, distance and affinity."""
 
-    # There is nothing to improve when the baseline has no assignments.
     if baseline.empty:
         return baseline.copy(), {"iterations": 0}
 
-    # Index the profile by SKU so each baseline row can find its product data.
     profile_by_sku = profile.set_index("SKU_ID")
-    neighbors = _affinity_neighbors(affinity)
-
-    # Store optimized rows and prevent two SKUs from sharing one location.
+    affinity_index = _affinity_index(affinity)
+    placed_locations: dict[str, pd.Series] = {}
     rows = []
     used = set()
-    placed_locations = {}
 
-    # Re-evaluate every baseline assignment independently.
+    distance_weight = float(config.get("objective_weights", {}).get("distance", 1.0))
+    affinity_weight = float(config.get("objective_weights", {}).get("affinity", 0.25))
+    ergonomic_weight = float(config.get("objective_weights", {}).get("ergonomic", 0.1))
+
+    max_distance = float(locations["Distance_to_Dispatch_Depot_m"].max()) if not locations.empty else 0.0
+    max_distance = max(max_distance, 1.0)
+
+    # ML forecast now affects the optimized layout itself: high predicted-demand
+    # SKUs are placed first, giving them first access to the best feasible bins.
+    # The baseline order remains historical-demand based, so the two strategies
+    # can still be compared fairly.
+    if "Predicted_Next_Week_Demand" in profile.columns:
+        ml_priority = profile_by_sku["Predicted_Next_Week_Demand"].reindex(baseline.SKU_ID)
+        ml_priority = pd.to_numeric(ml_priority, errors="coerce").fillna(0.0)
+        baseline = baseline.assign(_ml_priority=baseline.SKU_ID.map(ml_priority))
+        baseline = baseline.sort_values(
+            ["_ml_priority", "SKU_ID"], ascending=[False, True]
+        ).drop(columns="_ml_priority")
+        ml_used = True
+    else:
+        # Keep the optimizer usable for older profiles that do not contain ML data.
+        ml_used = False
+
     for row in baseline.itertuples(index=False):
-        # Look up the physical and demand metadata for the SKU.
         product = profile_by_sku.loc[row.SKU_ID]
-
-        # Only unused locations are candidates for this SKU.
         candidates = locations[~locations.Location_ID.isin(used)]
 
-        # Remove every location that violates a known constraint.
+        # Keep dedicated oversized slots available for SKUs that cannot fit a
+        # standard bin. Fall back naturally only when a SKU has no standard-bin fit.
+        if "Location_Type" in locations.columns:
+            standard_locations = locations[locations.Location_Type != "OVERSIZED"]
+            if not standard_locations.empty and standard_locations.apply(
+                lambda location: fits_product(
+                    product, location, bool(config.get("allow_rotations", True))
+                ),
+                axis=1,
+            ).any():
+                candidates = candidates[candidates.Location_Type != "OVERSIZED"]
+
         candidates = candidates[
             candidates.apply(
-                lambda location: is_product_location_feasible(
-                    product,
-                    location,
-                    config,
-                ),
+                lambda location: is_product_location_feasible(product, location, config),
                 axis=1,
             )
         ].copy()
 
-        # A baseline assignment should always have at least one known-feasible replacement.
         if candidates.empty:
-            raise ValueError(
-                f"No known-feasible location remains for baseline SKU {row.SKU_ID}."
+            raise ValueError(f"No known-feasible location remains for baseline SKU {row.SKU_ID}.")
+
+        def score(location: pd.Series) -> float:
+            distance = float(location["Distance_to_Dispatch_Depot_m"])
+            heavy_penalty = float(location["Shelf_Level"]) * (0.5 if product.Weight_kg > 10 else 0.0)
+            affinity = _affinity_score(
+                row.SKU_ID,
+                location,
+                placed_locations,
+                affinity_index,
+                max_distance,
+            )
+            # Scale the normalized affinity bonus to the warehouse distance range so
+            # the configured objective weights are comparable in magnitude.
+            affinity_bonus = affinity * max_distance
+            return (
+                distance_weight * distance
+                + ergonomic_weight * heavy_penalty
+                - affinity_weight * affinity_bonus
             )
 
-        candidates = _score_candidates(
-            row.SKU_ID,
-            product,
-            candidates,
-            placed_locations,
-            neighbors,
-            config,
-        )
-
-        # Choose the best score, using Location_ID as a deterministic tie-breaker.
+        candidates["score"] = candidates.apply(score, axis=1)
         location = candidates.sort_values(["score", "Location_ID"]).iloc[0]
         used.add(location.Location_ID)
         placed_locations[row.SKU_ID] = location
 
-        # Save the optimized placement and its rationale.
+        affinity_used = _affinity_score(
+            row.SKU_ID,
+            location,
+            placed_locations,
+            affinity_index,
+            max_distance,
+        )
+        rationale = "feasible distance/ergonomic greedy placement"
+        if ml_used:
+            rationale += " with ML demand priority"
+        if affinity_used > 0:
+            rationale += " and affinity-aware co-location"
+
         rows.append(
             {
                 "SKU_ID": row.SKU_ID,
                 "Location_ID": location.Location_ID,
                 "Demand_Class": product.ABC_Class,
-                "Placement_Rationale": "demand-weighted accessible feasible location",
+                "Placement_Rationale": rationale,
             }
         )
 
-    # Return the optimized layout and metadata describing the heuristic.
     result = pd.DataFrame(rows)
     return result, {
         "iterations": 1,
-        "heuristic": "feasible weighted distance/affinity greedy reassignment",
-        "objective_weights": _objective_weights(config),
-        "affinity_pairs_available": int(len(affinity)) if affinity is not None else 0,
-        "affinity_pairs_used": int(sum(len(values) for values in neighbors.values()) / 2),
+        "heuristic": "feasible ML-priority distance/ergonomic greedy reassignment with affinity",
+        "ml_demand_priority_used": ml_used,
+        "affinity_pairs_used": sum(1 for sku in affinity_index if sku in placed_locations),
     }
 
 
@@ -225,12 +199,7 @@ def improve_layout_by_route_distance(
     max_passes=1,
     max_orders=500,
 ):
-    """Improve a layout with deterministic feasible location swaps.
-
-    The search keeps the assigned SKU set and occupied location set fixed. Each
-    candidate swaps the locations of two assigned SKUs, rejects known feasibility
-    violations, and accepts only a strict reduction in total route distance.
-    """
+    """Improve a layout with deterministic feasible location swaps."""
 
     current = layout.copy().reset_index(drop=True)
     if current.empty:
@@ -266,7 +235,6 @@ def improve_layout_by_route_distance(
             break
         best_layout = None
         best_distance = current_distance
-
         for index, first_sku in enumerate(sku_order):
             for second_sku in sku_order[index + 1 :]:
                 if attempted >= int(max_swap_attempts):
@@ -277,21 +245,17 @@ def improve_layout_by_route_distance(
                 second_location = location_by_sku[second_sku]
                 candidate.loc[candidate["SKU_ID"] == first_sku, "Location_ID"] = second_location
                 candidate.loc[candidate["SKU_ID"] == second_sku, "Location_ID"] = first_location
-
                 if not known_feasible(candidate):
                     continue
                 candidate_distance = route_distance(candidate)
                 if candidate_distance < best_distance:
                     best_distance = candidate_distance
                     best_layout = candidate
-
             if attempted >= int(max_swap_attempts):
                 break
-
         passes_completed += 1
         if best_layout is None:
             break
-
         current = best_layout
         current_distance = best_distance
         location_by_sku = current.set_index("SKU_ID")["Location_ID"].to_dict()
