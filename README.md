@@ -1,111 +1,72 @@
 # SnakeCharmers — Smart Warehouse Slotting & Optimization
 
-EPOCH Hackathon project: a constraint-aware warehouse slotting engine that assigns SKUs to storage locations and evaluates picking efficiency against a feasible baseline.
+A reproducible prototype that uses Olist e-commerce order history to forecast demand, allocate a configurable active SKU assortment to a synthetic warehouse, optimize slotting heuristically, simulate picking routes, and compare results in a Streamlit dashboard.
 
-## Step 1 — Data foundation
+## Quick start (Windows PowerShell)
 
-The repository now includes a reproducible prototype pipeline from Olist normalization through demand profiling, feasible baseline allocation, heuristic optimization, route simulation, evaluation, and a Streamlit dashboard.
+Run commands from the repository root. The project has been tested locally by the maintainer with the existing `.venv`; fresh environments should install dependencies first.
 
-### Data sources
-- Orders and product metadata: [Olist Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
-- Warehouse topology: synthetic, generated from config/warehouse_config.json because Olist does not include warehouse racks, bins, aisle coordinates, or storage load ratings.
-- Hazard/handling attributes and current inventory: not reliably provided by Olist. Such values are left unspecified rather than represented as real data.
+```powershell
+git checkout Magnus
+git pull origin Magnus
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe -m scripts.run_pipeline
+.venv\Scripts\python.exe scripts\validate_saved_layouts.py
+.venv\Scripts\python.exe -m streamlit run dashboard.py
+```
 
-Raw and processed data are excluded from Git.
+If setting up from scratch, create the virtual environment first:
 
-## Setup
+```powershell
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
-Use Python 3.11+ (required by the pandas 3.x dependency range).
+## Input data
 
-    python -m venv .venv
-    # macOS/Linux
-    source .venv/bin/activate
-    # Windows PowerShell: .venv\Scripts\Activate.ps1
-    python -m pip install --upgrade pip
-    pip install -r requirements.txt
+The pipeline uses the public [Olist Brazilian E-Commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Raw files are not committed to Git. Download/prepare the data using the scripts in `scripts/` and follow any Kaggle access/credential requirements. The pipeline expects the raw CSV files in `data/raw/`.
 
-## 1. Download Olist
+**Data limitations that must remain explicit:**
+- Olist order items do not supply a dependable explicit quantity field, so recorded order-item lines are used as a demand proxy.
+- Olist does not supply a current inventory snapshot. `Inventory_Units` can remain unknown; any representative-stock fallback is a simulation assumption, not measured inventory.
+- Olist does not supply dependable SKU hazard/handling classifications. Missing values remain unspecified and must not be treated as safety clearance.
+- Warehouse locations, rack/bin dimensions, capacity values, and distances are synthetic configuration inputs, not surveyed warehouse data or engineering certification.
 
-1. Sign in to Kaggle and accept the dataset terms.
-2. Configure Kaggle API credentials: https://github.com/Kaggle/kaggle-api#api-credentials
-3. Run from the repository root:
+## Pipeline
 
-    python -m scripts.download_olist
+1. Load and normalize Olist inputs.
+2. Analyze SKU demand and data quality.
+3. Forecast next-week SKU demand with a Ridge model.
+4. Compute product affinity from order co-occurrence.
+5. Generate synthetic warehouse locations.
+6. Allocate the configured active assortment with a constraint-aware baseline.
+7. Reassign feasible slots using demand priority, affinity, distance, and ergonomic heuristics.
+8. Simulate baseline and optimized picking routes.
+9. Evaluate route distance/time, coverage, utilization, and validation-data completeness.
+10. Save reports and CSV outputs for the dashboard.
 
-This downloads and extracts CSV files to data/raw/.
+Configuration lives in `config/`. Source modules are in `src/`, runnable scripts in `scripts/`, and tests in `tests/`.
 
-## 2. Prepare normalized inputs
+## Main outputs
 
-    python -m scripts.prepare_data
+Generated artifacts are written locally under `data/processed/` (typically ignored by Git). Reports are written under `reports/`, including:
+- `data_foundation_audit.md`
+- `eda_report.md`
+- `ml_demand_report.md`
+- `optimization_report.md`
+- `unallocated_sku_diagnosis.md`
+- `final_validation_report.md`
 
-Outputs:
-- data/processed/orders.csv — order-item demand lines, timestamps, status, price and freight.
-- data/processed/sku_master.csv — product dimensions, weight, category, and explicitly unspecified handling/hazard attributes.
-- data/processed/warehouse_locations.csv — generated bins/racks/shelves with coordinates and capacity metadata.
+The dashboard reads the saved CSV outputs; run the pipeline first, then launch Streamlit.
 
-**Important Olist limitation:** its order-item table does not provide an explicit quantity field. Quantity=1 is used as a transparent per-order-item proxy, not as a claim that Olist records a real line quantity. We will review this during EDA. Olist also has no current inventory snapshot, so Inventory_Units remains blank until a documented synthetic-stock assumption is chosen.
+## Interpreting metrics safely
 
-## Synthetic topology defaults
+- **Active assortment coverage** measures whether the selected assortment was allocated; it is not coverage of every SKU in the full catalog.
+- **Catalog-wide allocation coverage** uses the full product profile as its denominator and can therefore be low when only a limited active assortment is modeled.
+- **Whole-warehouse utilization** and **allocated-bin utilization** use different capacity denominators and should not be confused with allocation coverage.
+- **Confirmed violations** and **UNVERIFIED checks** are separate. Unknown inventory, hazard, or handling attributes are not evidence that a layout is safe.
+- The optimizer is a greedy heuristic, not a proof of global optimality. Simulated routes and estimated time are not measured warehouse performance.
 
-6 aisles × 2 rack sides × 5 bays × 4 shelf levels = 240 locations. Geometry, bin size, dispatch point, and capacity ratings can be changed in config/warehouse_config.json. These are simulation assumptions, not real engineering/safety ratings. Distance_to_Dispatch_Depot_m is initially a Manhattan-distance approximation; route simulation will later use walkable aisles.
-
-## Architecture
-
-    smart-warehouse/
-    ├── config/warehouse_config.json
-    ├── data/raw/                 # downloads, ignored by Git
-    ├── data/processed/           # generated CSVs, ignored by Git
-    ├── src/
-    │   ├── data_loader.py
-    │   ├── warehouse_generator.py
-    │   ├── demand_analysis.py   # next stage
-    │   ├── affinity_analysis.py # next stage
-    │   ├── feasibility.py       # next stage
-    │   ├── baseline.py          # next stage
-    │   ├── optimizer.py         # next stage
-    │   ├── routing.py           # next stage
-    │   └── evaluation.py        # next stage
-    ├── scripts/download_olist.py
-    ├── scripts/prepare_data.py
-    ├── tests/
-    ├── reports/
-    └── dashboard.py              # later stage
-
-## Assumptions to revisit
-- Product length maps to Depth_cm, and product weight in grams is converted to kilograms.
-- Missing physical attributes are preserved for EDA instead of silently imputed.
-- Hazard_Class and Handling_Type are UNSPECIFIED; these should not be guessed from product category.
-- Warehouse capacity/zone data is synthetic, and must be treated as configurable simulation inputs.
-- The allocation stage must report infeasible products rather than forcing an unsafe fit.
-
-## Run the complete pipeline
-
-From the repository root in the project `.venv`:
-
-    .venv\Scripts\python.exe scripts\run_pipeline.py
-
-The runner uses existing local raw data, regenerates normalized and generated outputs deterministically, and writes allocations, routes, violations, comparisons, and reports under `data/processed/` and `reports/`.
-
-Launch the dashboard after the pipeline has completed:
-
-    .venv\Scripts\python.exe -m streamlit run dashboard.py
-
-Run tests with:
-
-    .venv\Scripts\python.exe -m pytest -q
-
-## Method and limitations
-
-The active assortment is configurable in `config/simulation_config.json` and defaults to up to 200 demand-ranked SKUs with usable dimensions and weight. The first prototype models one representative unit per selected SKU; this is not an Olist inventory observation. Quantity remains one recorded order-item line, hazard and handling remain unspecified, and the warehouse topology and capacity ratings are synthetic.
-
-The baseline is deterministic and hard-constraint aware. The optimizer is a feasible greedy reassignment using demand accessibility and ergonomic preferences; it is a heuristic and has no global optimality guarantee. Route distances use a deterministic Manhattan aisle approximation until a measured walkable graph is available. Metrics are generated from actual local inputs and are scoped to the active assortment and simulated route sample.
-
-See `reports/data_foundation_audit.md`, `reports/eda_report.md`, `reports/optimization_report.md`, and `reports/final_validation_report.md` after running the pipeline.
-
-## Constraint-validation evidence
-
-The independent validator treats missing Olist inventory, hazard, and handling information as **UNVERIFIED**, never as safety-compliant. Its representative-stock fallback is explicitly configured in `config/simulation_config.json`; bin, location, shelf, rack, dimension, ergonomic, and configured known-incompatibility checks use this model. The heavy-SKU placement rule is a prototype assumption (over 10 kg must be on shelf level 1 or 2), not a regulatory conclusion. No category or hazard rule is inferred from Olist; documented rules must be added to the configuration before they can be enforced.
-
-Validate the existing saved layouts without regenerating the pipeline:
-
-    .venv\Scripts\python.exe scripts\validate_saved_layouts.py
+See [HANDOVER.md](HANDOVER.md) for the final verification checklist, known limitations, and transfer instructions.
