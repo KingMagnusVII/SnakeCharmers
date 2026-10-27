@@ -192,6 +192,27 @@ def main() -> None:
         "baseline": evaluate(source_sample_baseline_routes, baseline, profile, locations, config),
         "optimized": evaluate(source_sample_optimized_routes, optimized, profile, locations, config),
     }
+
+    # Persist both scopes so the dashboard can show the 100% eligible-cohort
+    # result without hiding coverage across the first 500 source orders.
+    (reports / "order_completion_scope.json").write_text(
+        json.dumps(
+            {
+                "eligible_orders_available": int(eligible_orders_all["Order_ID"].nunique()),
+                "eligible_orders_evaluated": int(route_sample_orders["Order_ID"].nunique()),
+                "eligible_completion_rate": baseline_metrics["completion_rate"] if "baseline_metrics" in locals() else (
+                    float(baseline_routes["Complete"].map(
+                        lambda value: value is True or str(value).strip().lower() == "true"
+                    ).mean()) if not baseline_routes.empty else 0.0
+                ),
+                "source_sample_definition": "first 500 source orders, including orders with no allocated SKUs",
+                "source_first_500_baseline": source_sample_metrics["baseline"],
+                "source_first_500_optimized": source_sample_metrics["optimized"],
+            },
+            indent=2,
+        ) + "\\n",
+        encoding="utf-8",
+    )
     baseline_routes.to_csv(out / "baseline_routes.csv", index=False)
     optimized_routes.to_csv(out / "optimized_routes.csv", index=False)
 
