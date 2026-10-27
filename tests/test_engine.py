@@ -39,7 +39,7 @@ def _rules(layout, skus=None, locations=None, config=CONFIG):
 
 
 def test_warehouse_deterministic_count():
-    assert len(generate_warehouse()) == 240
+    assert len(generate_warehouse()) == 244
     assert generate_warehouse().equals(generate_warehouse())
 
 
@@ -212,3 +212,29 @@ def test_evaluation_arithmetic_zero_distance_and_incomplete_orders():
     assert empty_metrics["average_distance_m"] == 0.0
     comparison = compare({"total_distance_m": 10.0}, {"total_distance_m": 7.5})
     assert comparison.iloc[0].Change == -2.5
+
+
+def test_oversized_storage_fits_and_allocates_four_outlier_skus():
+    locations = generate_warehouse()
+    oversized = locations[locations.Location_Type == "OVERSIZED"]
+    assert len(locations) == 244
+    assert set(oversized.Location_ID) == {
+        "OVR-AUTO-01", "OVR-AUTO-02", "OVR-AUTO-03", "OVR-LONG-01"
+    }
+
+    # Three wide automotive products and one long stationery product match
+    # the real outlier dimensions found in the active assortment.
+    profile = pd.DataFrame([
+        {"SKU_ID": "auto-67", "Width_cm": 67, "Height_cm": 10, "Depth_cm": 67, "Weight_kg": 4.105, "Inventory_Units": 1, "Category": "automotivo", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 44890, "Recorded_Order_Lines": 4, "Physical_Metadata_Usable": True, "ABC_Class": "A"},
+        {"SKU_ID": "auto-65", "Width_cm": 65, "Height_cm": 11, "Depth_cm": 65, "Weight_kg": 5.950, "Inventory_Units": 1, "Category": "automotivo", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 46475, "Recorded_Order_Lines": 3, "Physical_Metadata_Usable": True, "ABC_Class": "A"},
+        {"SKU_ID": "auto-61", "Width_cm": 61, "Height_cm": 14, "Depth_cm": 61, "Weight_kg": 7.625, "Inventory_Units": 1, "Category": "automotivo", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 52094, "Recorded_Order_Lines": 2, "Physical_Metadata_Usable": True, "ABC_Class": "B"},
+        {"SKU_ID": "long-101", "Width_cm": 15, "Height_cm": 15, "Depth_cm": 101, "Weight_kg": 0.750, "Inventory_Units": 1, "Category": "papelaria", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 22725, "Recorded_Order_Lines": 1, "Physical_Metadata_Usable": True, "ABC_Class": "C"},
+    ])
+    baseline, excluded = allocate_baseline(
+        profile, locations, {**CONFIG, "max_active_skus": 4}
+    )
+    assert excluded.empty
+    assert len(baseline) == 4
+    assert set(baseline.Location_ID).issubset(set(oversized.Location_ID))
+    validation = validate_layout(baseline, profile, locations, CONFIG)
+    assert not (validation.Status == "VIOLATION").any()
