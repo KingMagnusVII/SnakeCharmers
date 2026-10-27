@@ -170,16 +170,43 @@ def test_optimizer_uses_affinity_to_prefer_nearby_related_skus():
     assert with_affinity.loc[with_affinity.SKU_ID == "b", "Location_ID"].iloc[0] == "L2"
 
 
+def test_baseline_reports_products_that_fit_no_bin_dimensions():
+    # The product has usable metadata but is too large for every test bin.
+    profile = _skus().iloc[[0]].copy()
+    profile.loc[profile.index[0], ["Width_cm", "Height_cm", "Depth_cm"]] = [50, 50, 50]
+    _, excluded = allocate_baseline(
+        profile,
+        _locations(),
+        {**CONFIG, "max_active_skus": 10},
+    )
+    assert len(excluded) == 1
+    assert excluded.iloc[0]["Reason"] == "does_not_fit_any_bin_dimensions"
+
+
 def test_evaluation_arithmetic_zero_distance_and_incomplete_orders():
     profile, locations = _skus(), _locations()
     layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
     routes = pd.DataFrame({"Distance_m": [0.0, 10.0], "Complete": [True, "false"]})
-    metrics = evaluate(routes, layout, profile, locations, {"walking_speed_m_per_min": 10, "pick_handling_seconds": 0})
+    metrics = evaluate(
+        routes,
+        layout,
+        profile,
+        locations,
+        {
+            "walking_speed_m_per_min": 10,
+            "pick_handling_seconds": 0,
+            "max_active_skus": 1,
+        },
+    )
     assert metrics["orders_simulated"] == 2
     assert metrics["complete_orders"] == 1
     assert metrics["total_distance_m"] == 10
     assert metrics["average_distance_m"] == 5
     assert metrics["allocation_coverage"] == 0.5
+    assert metrics["active_assortment_sku_count"] == 1
+    assert metrics["active_assortment_allocated_sku_count"] == 1
+    assert metrics["active_assortment_unallocated_sku_count"] == 0
+    assert metrics["active_assortment_coverage"] == 1.0
     assert metrics["order_line_coverage"] == 0.6
     empty_metrics = evaluate(pd.DataFrame(columns=["Distance_m", "Complete"]), layout, profile, locations, {})
     assert empty_metrics["average_distance_m"] == 0.0
