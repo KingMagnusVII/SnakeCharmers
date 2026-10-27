@@ -51,21 +51,19 @@ def main() -> None:
 
     scoped = orders[orders.Order_Status.isin(config["demand_statuses"])]
 
-    # Use the ML forecast as the primary signal when selecting the active assortment.
-    active = set(
-        profile[profile.Physical_Metadata_Usable]
-        .sort_values(
-            ["Predicted_Next_Week_Demand", "Recorded_Order_Lines", "SKU_ID"],
-            ascending=[False, False, True],
-        )
-        .head(config["max_active_skus"])
-        .SKU_ID
-    )
+    # Build the historical baseline first. This keeps the benchmark independent
+    # of ML so the final evaluation can show whether ML actually improves it.
+    baseline, excluded = allocate_baseline(profile, locations, config)
 
+    # Use the exact baseline assortment for affinity analysis so both strategies
+    # are compared on the same SKUs. The optimizer then uses ML demand priority
+    # when deciding which of those SKUs gets the best feasible locations.
+    active = set(baseline.SKU_ID)
     affinity = compute_affinity(scoped, active)
     affinity.to_csv(out / "affinity_pairs.csv", index=False)
 
-    baseline, excluded = allocate_baseline(profile, locations, config)
+    # Stage 11: optimize the same assortment with ML priority + affinity while
+    # retaining hard feasibility and distance/ergonomic objectives.
     optimized, opt_info = optimize_layout(
         profile, locations, baseline, affinity, config
     )
@@ -121,13 +119,17 @@ def main() -> None:
         "The model predicts next-week SKU demand from temporal lag/rolling "
         "features, historical demand, and product category.\n\n"
         + json.dumps(ml_info, indent=2, default=str)
-        + "\n",
+        + "\n\n"
+        "The forecast is used by the optimized allocator as a priority signal: "
+        "higher predicted-demand SKUs are considered first for the best feasible "
+        "locations. The historical baseline remains unchanged for comparison.\n",
         encoding="utf-8",
     )
 
     (reports / "optimization_report.md").write_text(
         "# Optimization report\n\n"
-        "Heuristic feasible reassignment; no global optimality claim.\n\n"
+        "Heuristic feasible reassignment using ML demand priority, warehouse "
+        "distance, ergonomics, and order affinity; no global optimality claim.\n\n"
         + json.dumps(opt_info, indent=2)
         + "\n",
         encoding="utf-8",
@@ -151,6 +153,7 @@ def main() -> None:
                 "baseline_violations": len(baseline_violations),
                 "optimized_violations": len(optimized_violations),
                 "ml_demand": ml_info,
+                "optimization": opt_info,
                 "runtime_seconds": runtime_seconds,
             },
             indent=2,
