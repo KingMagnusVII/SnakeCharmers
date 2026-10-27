@@ -75,11 +75,11 @@ def apply_operational_metadata(
     for column in ("Inventory_Units",):
         supplied = overlay[column].notna()
         numeric = pd.to_numeric(overlay.loc[supplied, column], errors="coerce")
-        invalid = numeric.isna() | (numeric <= 0) | (numeric % 1 != 0)
+        invalid = numeric.isna() | (numeric < 0) | (numeric % 1 != 0)
         if invalid.any():
             bad_rows = overlay.loc[supplied].loc[invalid, "SKU_ID"].astype(str).tolist()
             raise OperationalMetadataError(
-                f"{column} must be a positive whole-number on-hand quantity; invalid SKUs: {bad_rows[:20]}"
+                f"{column} must be a non-negative whole-number on-hand quantity; invalid SKUs: {bad_rows[:20]}"
             )
 
     def nonblank(frame: pd.DataFrame, column: str) -> pd.Series:
