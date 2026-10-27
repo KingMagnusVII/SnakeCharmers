@@ -3,28 +3,118 @@ from __future__ import annotations  # Enables modern type annotations.
 
 import pandas as pd  # Provides DataFrame operations.
 
+from .demand_analysis import product_dimensional_fit  # Filters dimensionally impossible SKUs before the assortment cap.
 from .feasibility import fits_product, is_product_location_feasible, modeled_stock_load_kg, rack_load_fits  # Reuses dimensional and hard-constraint checks.
+
+
+def select_feasible_candidates(
+    profile: pd.DataFrame,
+    locations: pd.DataFrame,
+    config: dict,
+) -> pd.DataFrame:
+    """Select demand-ranked SKUs that fit at least one configured location."""
+
+    max_skus = int(config.get("max_active_skus", 200))
+    usable = profile[profile.Physical_Metadata_Usable].copy()
+    dimensional_fit = product_dimensional_fit(
+        usable,
+        locations,
+        allow_rotations=bool(config.get("allow_rotations", True)),
+    )
+    feasible_ids = set(
+        dimensional_fit.loc[dimensional_fit.Fit_Location_Count > 0, "SKU_ID"]
+    )
+    return (
+        usable[usable.SKU_ID.isin(feasible_ids)]
+        .sort_values(
+            ["Recorded_Order_Lines", "SKU_ID"],
+            ascending=[False, True],
+        )
+        .head(max(0, max_skus))
+        .copy()
+    )
+
+
+def select_order_coverage_candidates(
+    profile: pd.DataFrame,
+    locations: pd.DataFrame,
+    orders: pd.DataFrame,
+    config: dict,
+) -> pd.DataFrame:
+    """Select feasible SKUs greedily by the number of whole orders they can complete.
+
+    This optional strategy is useful for comparing assortment selection policies.
+    Ties are resolved deterministically by order incidence, recorded demand, and SKU ID.
+    """
+
+    max_skus = int(config.get("max_active_skus", 200))
+    usable = profile[profile.Physical_Metadata_Usable].copy()
+    dimensional_fit = product_dimensional_fit(
+        usable,
+        locations,
+        allow_rotations=bool(config.get("allow_rotations", True)),
+    )
+    feasible_ids = set(
+        dimensional_fit.loc[dimensional_fit.Fit_Location_Count > 0, "SKU_ID"]
+    )
+    feasible = usable[usable.SKU_ID.isin(feasible_ids)].copy()
+    if max_skus <= 0 or feasible.empty:
+        return feasible.iloc[0:0].copy()
+
+    grouped_orders = (
+        orders.loc[orders["Order_ID"].notna() & orders["SKU_ID"].notna()]
+        .groupby("Order_ID", sort=True)["SKU_ID"]
+        .agg(lambda values: frozenset(values))
+    )
+    feasible_set = set(feasible.SKU_ID)
+    order_sets = [items for items in grouped_orders if items and items <= feasible_set]
+    order_remaining = {index: len(items) for index, items in enumerate(order_sets)}
+    candidate_orders = {sku: [] for sku in feasible_set}
+    for index, items in enumerate(order_sets):
+        for sku in items:
+            candidate_orders[sku].append(index)
+
+    remaining = set(feasible_set)
+    metadata = feasible.set_index("SKU_ID").to_dict("index")
+    for sku in metadata:
+        metadata[sku]["SKU_ID"] = sku
+    rows = []
+    while remaining and len(rows) < max_skus:
+        def score(sku: str) -> tuple[int, int, int, int]:
+            order_indexes = candidate_orders[sku]
+            completed = sum(order_remaining[index] == 1 for index in order_indexes)
+            potential = len(order_indexes)
+            row = metadata[sku]
+            return (
+                completed,
+                potential,
+                int(row.get("Distinct_Orders", 0)),
+                int(row.get("Recorded_Order_Lines", 0)),
+            )
+
+        best_score = max(score(sku) for sku in remaining)
+        chosen = min(sku for sku in remaining if score(sku) == best_score)
+        rows.append(metadata[chosen])
+        for index in candidate_orders[chosen]:
+            order_remaining[index] -= 1
+        remaining.remove(chosen)
+
+    return pd.DataFrame(rows, columns=feasible.columns).reset_index(drop=True)
 
 
 def allocate_baseline(
     profile: pd.DataFrame,
     locations: pd.DataFrame,
     config: dict,
+    candidates: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Allocate eligible SKUs to feasible locations deterministically."""
+    """Allocate selected SKUs while enforcing location and aggregate rack limits."""
 
-    # Limit the active assortment to the configured number of SKUs.
-    max_skus = int(config.get("max_active_skus", 200))
-
-    # Keep only products with usable physical metadata and rank by demand.
+    usable = profile[profile.Physical_Metadata_Usable].copy()
     eligible = (
-        profile[profile.Physical_Metadata_Usable]
-        .sort_values(
-            ["Recorded_Order_Lines", "SKU_ID"],
-            ascending=[False, True],
-        )
-        .head(max_skus)
-        .copy()
+        select_feasible_candidates(profile, locations, config)
+        if candidates is None
+        else candidates.copy()
     )
 
     # Track occupied locations and products that could not be placed.
@@ -32,6 +122,18 @@ def allocate_baseline(
     rack_loads: dict[str, float] = {}
     rows = []
     excluded = []
+
+    # Report dimensionally infeasible SKUs explicitly instead of allowing
+    # high-demand impossible products to consume the active-assortment cap.
+    dimensional_fit = product_dimensional_fit(
+        usable,
+        locations,
+        allow_rotations=bool(config.get("allow_rotations", True)),
+    ).set_index("SKU_ID")
+    selected_ids = set(eligible.SKU_ID)
+    for _, product in usable[~usable.SKU_ID.isin(selected_ids)].iterrows():
+        if dimensional_fit.loc[product.SKU_ID, "Fit_Location_Count"] == 0:
+            excluded.append({"SKU_ID": product.SKU_ID, "Reason": "does_not_fit_any_bin_dimensions"})
 
     # Place larger products first so they have the widest choice of bins.
     ordered = eligible.sort_values(
