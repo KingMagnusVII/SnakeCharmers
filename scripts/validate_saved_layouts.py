@@ -43,17 +43,22 @@ def operational_metadata_gaps(assigned_skus: pd.DataFrame) -> dict[str, int]:
         assigned_skus.get("Inventory_Units", pd.Series(index=assigned_skus.index, dtype=float)),
         errors="coerce",
     )
+    inventory_invalid = inventory.isna() | (inventory < 0) | ((inventory % 1) != 0)
+    inventory_snapshot = pd.to_datetime(assigned_skus.get("Inventory_Snapshot_At", pd.Series(index=assigned_skus.index, dtype=object)), errors="coerce", utc=True)
+    safety_verified = pd.to_datetime(assigned_skus.get("Safety_Verified_At", pd.Series(index=assigned_skus.index, dtype=object)), errors="coerce", utc=True)
     return {
-        "missing_inventory_skus": int((inventory.isna() | (inventory < 0)).sum()),
+        "missing_inventory_skus": int(inventory_invalid.sum()),
         "missing_hazard_class_skus": int(_missing_text(assigned_skus, "Hazard_Class").sum()),
         "missing_handling_type_skus": int(_missing_text(assigned_skus, "Handling_Type").sum()),
         "missing_inventory_provenance_skus": int(
             (_missing_text(assigned_skus, "Inventory_Snapshot_At") |
+             inventory_snapshot.isna() |
              _missing_text(assigned_skus, "Inventory_Data_Source")).sum()
         ),
         "missing_safety_provenance_skus": int(
             (_missing_text(assigned_skus, "Safety_Verified_By") |
              _missing_text(assigned_skus, "Safety_Verified_At") |
+             safety_verified.isna() |
              _missing_text(assigned_skus, "Safety_Data_Source")).sum()
         ),
     }
@@ -65,9 +70,10 @@ def operational_metadata_gap_rows(assigned_skus: pd.DataFrame) -> pd.DataFrame:
     for _, sku in assigned_skus.iterrows():
         missing = []
         inventory = pd.to_numeric(pd.Series([sku.get("Inventory_Units")]), errors="coerce").iloc[0]
-        if pd.isna(inventory) or inventory < 0:
+        if pd.isna(inventory) or inventory < 0 or inventory % 1 != 0:
             missing.append("Inventory_Units")
-        if _missing_text(pd.DataFrame([sku]), "Inventory_Snapshot_At").iloc[0]:
+        snapshot = pd.to_datetime(sku.get("Inventory_Snapshot_At"), errors="coerce", utc=True)
+        if pd.isna(snapshot) or _missing_text(pd.DataFrame([sku]), "Inventory_Snapshot_At").iloc[0]:
             missing.append("Inventory_Snapshot_At")
         if _missing_text(pd.DataFrame([sku]), "Inventory_Data_Source").iloc[0]:
             missing.append("Inventory_Data_Source")
@@ -75,7 +81,10 @@ def operational_metadata_gap_rows(assigned_skus: pd.DataFrame) -> pd.DataFrame:
             missing.append("Hazard_Class")
         if _missing_text(pd.DataFrame([sku]), "Handling_Type").iloc[0]:
             missing.append("Handling_Type")
-        for column in ("Safety_Verified_By", "Safety_Verified_At", "Safety_Data_Source"):
+        verified_at = pd.to_datetime(sku.get("Safety_Verified_At"), errors="coerce", utc=True)
+        if pd.isna(verified_at):
+            missing.append("Safety_Verified_At")
+        for column in ("Safety_Verified_By", "Safety_Data_Source"):
             if _missing_text(pd.DataFrame([sku]), column).iloc[0]:
                 missing.append(column)
         if missing:
