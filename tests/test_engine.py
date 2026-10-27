@@ -269,3 +269,20 @@ def test_zero_inventory_is_not_reported_as_invalid_stock():
     assert "invalid_inventory_units" not in set(result.Rule)
     assert "bin_volume_capacity" not in set(result.loc[result.Status == "VIOLATION", "Rule"])
     assert "location_weight_capacity" not in set(result.loc[result.Status == "VIOLATION", "Rule"])
+
+
+def test_evaluation_utilization_multiplies_volume_by_inventory_units():
+    profile = _skus().iloc[[0]].copy()
+    profile.loc[profile.index[0], "Inventory_Units"] = 3
+    locations = _locations().copy()
+    locations["Volumetric_Capacity_cm3"] = 4000
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    metrics = evaluate(
+        pd.DataFrame(columns=["Distance_m", "Complete"]),
+        layout,
+        profile,
+        locations,
+        {"representative_inventory_units": 1, "max_active_skus": 1},
+    )
+    assert metrics["whole_warehouse_utilization"] == 0.25
+    assert metrics["allocated_bin_utilization"] == 0.75
