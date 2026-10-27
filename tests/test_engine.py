@@ -259,3 +259,13 @@ def test_evaluation_exposes_missing_safety_and_inventory_attributes():
     assert metrics["unknown_hazard_attributes"] == 1
     assert metrics["unknown_handling_attributes"] == 1
     assert metrics["unknown_inventory_attributes"] == 1
+
+
+def test_zero_inventory_is_not_reported_as_invalid_stock():
+    skus = _skus()
+    skus.loc[skus.SKU_ID == "a", "Inventory_Units"] = 0
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    result = validate_layout(layout, skus, _locations(), CONFIG)
+    assert "invalid_inventory_units" not in set(result.Rule)
+    assert "bin_volume_capacity" not in set(result.loc[result.Status == "VIOLATION", "Rule"])
+    assert "location_weight_capacity" not in set(result.loc[result.Status == "VIOLATION", "Rule"])
