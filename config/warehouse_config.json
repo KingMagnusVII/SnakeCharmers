@@ -10,6 +10,10 @@
   "first_bay_y_m": 2.0,
   "dispatch_depot": {"x_m": 0.0, "y_m": 0.0, "z_m": 0.0},
   "bin_dimensions_cm": {"width": 40.0, "height": 30.0, "depth": 40.0},
+  "bin_dimensions_by_level": {
+    "1": {"width": 100.0, "height": 60.0, "depth": 60.0},
+    "2": {"width": 100.0, "height": 60.0, "depth": 60.0}
+  },
   "location_weight_capacity_by_level_kg": {"1": 40.0, "2": 35.0, "3": 30.0, "4": 20.0},
   "shelf_max_load_kg": 200.0,
   "rack_max_load_kg": 700.0,
