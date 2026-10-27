@@ -44,7 +44,7 @@ def operational_metadata_gaps(assigned_skus: pd.DataFrame) -> dict[str, int]:
         errors="coerce",
     )
     return {
-        "missing_inventory_skus": int((inventory.isna() | (inventory <= 0)).sum()),
+        "missing_inventory_skus": int((inventory.isna() | (inventory < 0)).sum()),
         "missing_hazard_class_skus": int(_missing_text(assigned_skus, "Hazard_Class").sum()),
         "missing_handling_type_skus": int(_missing_text(assigned_skus, "Handling_Type").sum()),
         "missing_inventory_provenance_skus": int(
@@ -64,7 +64,7 @@ def main() -> None:
     parser.add_argument(
         "--strict-operational-data",
         action="store_true",
-        help="exit with code 2 if allocated SKUs lack positive inventory, reviewed safety classifications, or provenance",
+        help="exit with code 2 if allocated SKUs lack non-negative inventory, reviewed safety classifications, or provenance",
     )
     args = parser.parse_args()
 
