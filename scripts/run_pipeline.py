@@ -55,6 +55,24 @@ def main() -> None:
     # of ML so the final evaluation can show whether ML actually improves it.
     baseline, excluded = allocate_baseline(profile, locations, config)
 
+    # Diagnose every active SKU that could not be allocated. This makes it clear
+    # whether the bottleneck is physical dimensions or remaining constraints.
+    excluded.to_csv(out / "unallocated_skus.csv", index=False)
+    reason_summary = (
+        excluded["Reason"]
+        .value_counts()
+        .rename_axis("Reason")
+        .reset_index(name="SKU_Count")
+        if not excluded.empty
+        else __import__("pandas").DataFrame(columns=["Reason", "SKU_Count"])
+    )
+    reason_summary["Share_of_Unallocated"] = (
+        reason_summary["SKU_Count"] / len(excluded)
+        if len(excluded)
+        else 0.0
+    )
+    reason_summary.to_csv(out / "unallocated_reason_summary.csv", index=False)
+
     # Use the exact baseline assortment for affinity analysis so both strategies
     # are compared on the same SKUs. The optimizer then uses ML demand priority
     # when deciding which of those SKUs gets the best feasible locations.
@@ -70,7 +88,6 @@ def main() -> None:
 
     baseline.to_csv(out / "baseline_allocation.csv", index=False)
     optimized.to_csv(out / "optimized_allocation.csv", index=False)
-    excluded.to_csv(out / "unallocated_skus.csv", index=False)
 
     baseline_violations = validate_layout(
         baseline, skus, locations, config["allow_rotations"]
@@ -135,6 +152,39 @@ def main() -> None:
         encoding="utf-8",
     )
 
+    # Explain why active-assortment SKUs remain unallocated so the next
+    # optimization step can target the real bottleneck instead of guessing.
+    reason_lines = [
+        "# Unallocated SKU diagnosis",
+        "",
+        f"Active assortment: {len(baseline) + len(excluded)} SKUs.",
+        f"Allocated: {len(baseline)} SKUs.",
+        f"Unallocated: {len(excluded)} SKUs.",
+        "",
+        "| Reason | SKU count | Share of unallocated |",
+        "|---|---:|---:|",
+    ]
+    if reason_summary.empty:
+        reason_lines.append("| None | 0 | 0.0% |")
+    else:
+        for _, row in reason_summary.iterrows():
+            reason_lines.append(
+                f"| {row['Reason']} | {int(row['SKU_Count'])} | "
+                f"{row['Share_of_Unallocated']:.1%} |"
+            )
+    reason_lines.extend(
+        [
+            "",
+            "Interpretation:",
+            "- `does_not_fit_any_bin_dimensions` means the SKU cannot physically fit in any generated bin, even with allowed rotation.",
+            "- `no_remaining_feasible_location` means at least one bin is dimensionally suitable, but all such locations were unavailable or violated another hard constraint when the SKU was considered.",
+        ]
+    )
+    (reports / "unallocated_sku_diagnosis.md").write_text(
+        "\n".join(reason_lines) + "\n",
+        encoding="utf-8",
+    )
+
     runtime_seconds = round(time.perf_counter() - start, 2)
     (reports / "final_validation_report.md").write_text(
         "# Final validation report\n\n"
@@ -152,6 +202,7 @@ def main() -> None:
                 "optimized": optimized_metrics,
                 "baseline_violations": len(baseline_violations),
                 "optimized_violations": len(optimized_violations),
+                "unallocated_reason_counts": reason_summary.set_index("Reason")["SKU_Count"].to_dict(),
                 "ml_demand": ml_info,
                 "optimization": opt_info,
                 "runtime_seconds": runtime_seconds,
