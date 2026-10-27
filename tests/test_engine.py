@@ -6,6 +6,7 @@ from src.evaluation import compare, evaluate
 from src.feasibility import fits_product, validate_layout
 from src import optimizer
 from src.optimizer import improve_layout_by_route_distance, optimize_layout
+from src.routing import route_orders
 from src.warehouse_generator import generate_warehouse
 from scripts.run_pipeline import _validation_summary
 
@@ -393,3 +394,62 @@ def test_route_refinement_respects_attempt_limit(monkeypatch):
 
     assert info["attempted_swaps"] == 1
     assert info["search_terminated_by_limit"] is True
+
+
+def test_evaluation_reports_completed_and_incomplete_route_distances():
+    profile = _skus()
+    locations = _locations()
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    routes = pd.DataFrame({
+        "Order_ID": ["complete", "incomplete"],
+        "Distance_m": [10.0, 20.0],
+        "Complete": [True, "false"],
+    })
+
+    metrics = evaluate(routes, layout, profile, locations, CONFIG)
+
+    assert metrics["complete_orders"] == 1
+    assert metrics["incomplete_orders"] == 1
+    assert metrics["completion_rate"] == 0.5
+    assert metrics["completed_route_distance_m"] == 10.0
+    assert metrics["incomplete_route_distance_m"] == 20.0
+    assert metrics["average_distance_complete_orders_m"] == 10.0
+    assert metrics["average_distance_incomplete_orders_m"] == 20.0
+
+
+def test_route_simulation_keeps_orders_with_no_allocated_skus_and_counts_sample():
+    orders = pd.DataFrame({
+        "Order_ID": ["o1", "o2", "o3"],
+        "SKU_ID": ["missing-1", "a", "missing-2"],
+    })
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    locations = _locations().assign(X_m=[2.0, 4.0, 6.0], Y_m=[0.0, 0.0, 0.0])
+
+    routes = route_orders(orders, layout, locations, max_orders=2)
+
+    assert routes.Order_ID.tolist() == ["o1", "o2"]
+    assert routes.loc[routes.Order_ID == "o1", "Complete"].item() == False
+    assert routes.loc[routes.Order_ID == "o1", "Distance_m"].item() == 0.0
+
+
+def test_route_simulation_marks_mixed_allocated_and_unallocated_order_incomplete():
+    orders = pd.DataFrame({"Order_ID": ["o1", "o1"], "SKU_ID": ["a", "missing"]})
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    locations = _locations().assign(X_m=[2.0, 4.0, 6.0], Y_m=[0.0, 0.0, 0.0])
+
+    routes = route_orders(orders, layout, locations)
+
+    assert len(routes) == 1
+    assert routes.iloc[0].Visited_SKUs == "a"
+    assert routes.iloc[0].Complete == False
+
+
+def test_empty_route_simulation_preserves_output_schema():
+    orders = pd.DataFrame(columns=["Order_ID", "SKU_ID"])
+    layout = pd.DataFrame(columns=["SKU_ID", "Location_ID"])
+    locations = _locations().assign(X_m=[2.0, 4.0, 6.0], Y_m=[0.0, 0.0, 0.0])
+
+    routes = route_orders(orders, layout, locations)
+
+    assert routes.empty
+    assert routes.columns.tolist() == ["Order_ID", "Visited_SKUs", "Distance_m", "Complete"]
