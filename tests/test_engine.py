@@ -99,6 +99,7 @@ def test_invalid_representative_inventory_fallback_is_a_violation():
     skus.loc[0, "Inventory_Units"] = None
     layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
 
+    # Invalid fallback values must be rejected because they cannot represent stock safely.
     for fallback in (0, -1, "not-a-number", None):
         config = {**CONFIG, "representative_inventory_units": fallback}
         result = validate_layout(layout, skus, _locations(), config)
@@ -106,8 +107,9 @@ def test_invalid_representative_inventory_fallback_is_a_violation():
         assert len(invalid) == 1
         assert invalid.iloc[0].Status == "VIOLATION"
 
+    # A valid fallback is used only when observed inventory is missing.
     valid_config = {**CONFIG, "representative_inventory_units": 1}
-    valid_result = validate_layout(layout, _skus(), _locations(), valid_config)
+    valid_result = validate_layout(layout, skus, _locations(), valid_config)
     assumed = valid_result[valid_result.Rule == "inventory_units"]
     assert len(assumed) == 1
     assert assumed.iloc[0].Status == "UNVERIFIED"
@@ -159,6 +161,7 @@ def test_optimizer_uses_affinity_to_prefer_nearby_related_skus():
     ])
     affinity = pd.DataFrame([{"SKU_A": "a", "SKU_B": "b", "Pair_Count": 10, "Lift": 4.0}])
 
+    # Compare the distance-only choice with a stronger affinity objective.
     without_affinity, _ = optimize_layout(profile, locations, baseline, pd.DataFrame(), CONFIG)
     affinity_config = {**CONFIG, "objective_weights": {"distance": 1.0, "affinity": 1.0, "ergonomic": 0.1}}
     with_affinity, _ = optimize_layout(profile, locations, baseline, affinity, affinity_config)
