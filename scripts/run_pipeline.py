@@ -19,7 +19,7 @@ from src.evaluation import compare, evaluate
 from src.feasibility import validate_layout
 from src.ml_demand import forecast_next_week_demand
 from src.optimizer import improve_layout_by_route_distance, optimize_layout
-from src.routing import route_orders
+from src.routing import route_orders, select_fully_allocatable_orders
 from src.warehouse_generator import generate_warehouse
 
 
@@ -62,9 +62,28 @@ def main() -> None:
 
     scoped = orders[orders.Order_Status.isin(config["demand_statuses"])]
 
+    # Keep end-to-end source coverage separate from route efficiency among
+    # orders whose every SKU is represented in the active assortment.
+    source_order_sample = scoped
+
     # Build the historical baseline first. This keeps the benchmark independent
     # of ML so the final evaluation can show whether ML actually improves it.
     baseline, excluded = allocate_baseline(profile, locations, config)
+
+    eligible_orders_all = select_fully_allocatable_orders(
+        scoped, baseline, max_orders=None
+    )
+    eligible_order_ids = (
+        eligible_orders_all["Order_ID"].drop_duplicates().head(500).tolist()
+    )
+    route_sample_orders = eligible_orders_all[
+        eligible_orders_all["Order_ID"].isin(eligible_order_ids)
+    ].copy()
+    if route_sample_orders.empty:
+        raise RuntimeError(
+            "No fully allocatable orders exist for the route-efficiency cohort. "
+            "Inspect the active assortment and source data before evaluating routes."
+        )
 
     # Diagnose every active SKU that could not be allocated. This makes it clear
     # whether the bottleneck is physical dimensions or remaining constraints.
@@ -100,7 +119,7 @@ def main() -> None:
         profile,
         locations,
         greedy,
-        scoped,
+        route_sample_orders,
         config,
         max_swap_attempts=config.get("max_local_search_iterations", 100),
         max_passes=1,
@@ -120,7 +139,7 @@ def main() -> None:
             if not validation.empty
             else 0
         )
-        candidate_routes = route_orders(scoped, candidate, locations, max_orders=500)
+        candidate_routes = route_orders(route_sample_orders, candidate, locations, max_orders=500)
         distance = (
             float(candidate_routes["Distance_m"].sum())
             if not candidate_routes.empty
@@ -165,8 +184,14 @@ def main() -> None:
     baseline_validation = _validation_summary(baseline_violations)
     optimized_validation = _validation_summary(optimized_violations)
 
-    baseline_routes = route_orders(scoped, baseline, locations)
-    optimized_routes = route_orders(scoped, optimized, locations)
+    baseline_routes = route_orders(route_sample_orders, baseline, locations)
+    optimized_routes = route_orders(route_sample_orders, optimized, locations)
+    source_sample_baseline_routes = route_orders(source_order_sample, baseline, locations, max_orders=500)
+    source_sample_optimized_routes = route_orders(source_order_sample, optimized, locations, max_orders=500)
+    source_sample_metrics = {
+        "baseline": evaluate(source_sample_baseline_routes, baseline, profile, locations, config),
+        "optimized": evaluate(source_sample_optimized_routes, optimized, profile, locations, config),
+    }
     baseline_routes.to_csv(out / "baseline_routes.csv", index=False)
     optimized_routes.to_csv(out / "optimized_routes.csv", index=False)
 
@@ -276,6 +301,13 @@ def main() -> None:
     print(
         json.dumps(
             {
+                "evaluation_scope": {
+                    "eligible_orders_available": int(eligible_orders_all["Order_ID"].nunique()),
+                    "eligible_orders_evaluated": int(route_sample_orders["Order_ID"].nunique()),
+                    "eligible_order_completion_rate": baseline_metrics["completion_rate"],
+                    "source_sample_definition": "first 500 source orders, including orders with no allocated SKUs",
+                },
+                "source_first_500_orders": source_sample_metrics,
                 "baseline": baseline_metrics,
                 "optimized": optimized_metrics,
                 "baseline_violations": baseline_validation["known_violations"],
