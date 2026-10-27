@@ -23,6 +23,16 @@ from src.routing import route_orders
 from src.warehouse_generator import generate_warehouse
 
 
+def _validation_summary(results):
+    """Separate confirmed violations from checks that remain unverified."""
+    if "Status" not in results.columns:
+        return {"known_violations": 0, "unverified_checks": 0}
+    return {
+        "known_violations": int((results["Status"] == "VIOLATION").sum()),
+        "unverified_checks": int((results["Status"] == "UNVERIFIED").sum()),
+    }
+
+
 def main() -> None:
     """Run every stage of the warehouse-slotting pipeline."""
     start = time.perf_counter()
@@ -97,6 +107,8 @@ def main() -> None:
     )
     baseline_violations.to_csv(out / "baseline_violations.csv", index=False)
     optimized_violations.to_csv(out / "optimized_violations.csv", index=False)
+    baseline_validation = _validation_summary(baseline_violations)
+    optimized_validation = _validation_summary(optimized_violations)
 
     baseline_routes = route_orders(scoped, baseline, locations)
     optimized_routes = route_orders(scoped, optimized, locations)
@@ -188,6 +200,13 @@ def main() -> None:
     runtime_seconds = round(time.perf_counter() - start, 2)
     (reports / "final_validation_report.md").write_text(
         "# Final validation report\n\n"
+        "Confirmed constraint violations and unverified checks are counted separately. "
+        "UNVERIFIED means source data is missing or unknown; it is not evidence of compliance.\n\n"
+        "| Layout | Confirmed violations | Unverified checks |\n"
+        "|---|---:|---:|\n"
+        f"| Baseline | {baseline_validation['known_violations']} | {baseline_validation['unverified_checks']} |\n"
+        f"| Optimized | {optimized_validation['known_violations']} | {optimized_validation['unverified_checks']} |\n\n"
+        "Evaluation metrics:\n\n"
         "```text\n"
         + comparison.to_string(index=False)
         + "\n```\n\n"
@@ -200,8 +219,10 @@ def main() -> None:
             {
                 "baseline": baseline_metrics,
                 "optimized": optimized_metrics,
-                "baseline_violations": len(baseline_violations),
-                "optimized_violations": len(optimized_violations),
+                "baseline_violations": baseline_validation["known_violations"],
+                "baseline_unverified_checks": baseline_validation["unverified_checks"],
+                "optimized_violations": optimized_validation["known_violations"],
+                "optimized_unverified_checks": optimized_validation["unverified_checks"],
                 "unallocated_reason_counts": reason_summary.set_index("Reason")["SKU_Count"].to_dict(),
                 "ml_demand": ml_info,
                 "optimization": opt_info,
