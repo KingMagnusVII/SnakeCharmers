@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from src.operational_data import OperationalMetadataError, apply_operational_metadata
+from scripts.validate_saved_layouts import operational_metadata_gaps
 
 
 def _sku_master():
@@ -110,3 +111,12 @@ def test_zero_on_hand_is_valid_and_can_be_recorded_with_provenance(tmp_path):
     }])
     master, _ = apply_operational_metadata(_sku_master(), path)
     assert int(master.set_index("SKU_ID").loc["sku-1", "Inventory_Units"]) == 0
+    assigned = master.loc[master.SKU_ID == "sku-1"].copy()
+    assigned["Hazard_Class"] = "NONE"
+    assigned["Handling_Type"] = "NORMAL"
+    assigned["Inventory_Data_Source"] = "WMS export"
+    assigned["Inventory_Snapshot_At"] = "2026-10-27"
+    assigned["Safety_Verified_By"] = "reviewer"
+    assigned["Safety_Verified_At"] = "2026-10-20"
+    assigned["Safety_Data_Source"] = "approved register"
+    assert all(value == 0 for value in operational_metadata_gaps(assigned).values())
