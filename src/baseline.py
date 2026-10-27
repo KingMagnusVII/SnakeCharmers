@@ -42,6 +42,19 @@ def allocate_baseline(
         # Only locations not already assigned to another SKU are candidates.
         choices = locations[~locations.Location_ID.isin(used)]
 
+        # Reserve dedicated oversized slots for products that do not fit any
+        # standard bin. The 240 standard bins provide ample capacity for the
+        # configured active assortment, so normal SKUs should not consume them.
+        if "Location_Type" in locations.columns:
+            standard_locations = locations[locations.Location_Type != "OVERSIZED"]
+            if not standard_locations.empty and standard_locations.apply(
+                lambda location: fits_product(
+                    product, location, bool(config.get("allow_rotations", True))
+                ),
+                axis=1,
+            ).any():
+                choices = choices[choices.Location_Type != "OVERSIZED"]
+
         # Apply the same feasibility rules used by the independent validator.
         match = choices[
             choices.apply(
