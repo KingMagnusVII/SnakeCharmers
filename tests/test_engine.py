@@ -286,3 +286,15 @@ def test_evaluation_utilization_multiplies_volume_by_inventory_units():
     )
     assert metrics["whole_warehouse_utilization"] == 0.25
     assert metrics["allocated_bin_utilization"] == 0.75
+
+
+def test_baseline_does_not_overload_aggregate_rack_capacity():
+    profile = _skus().copy()
+    locations = _locations().copy()
+    locations["Rack_Max_Load_kg"] = 50
+    baseline, excluded = allocate_baseline(profile, locations, {**CONFIG, "max_active_skus": 2})
+    assert len(baseline) == 1
+    assert len(excluded) == 1
+    assert excluded.iloc[0]["Reason"] == "no_remaining_feasible_location"
+    validation = validate_layout(baseline, profile, locations, CONFIG)
+    assert "aggregate_rack_load" not in set(validation.loc[validation.Status == "VIOLATION", "Rule"])
