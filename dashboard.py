@@ -48,12 +48,19 @@ with left:
     )
 
 with right:
-    # Show the number of known validation violations in the optimized layout.
+    # Separate confirmed violations from checks that remain unverified.
     st.subheader("Validation")
-    st.metric(
-        "Optimized violations",
-        len(pd.read_csv(DATA / "optimized_violations.csv")),
-    )
+    validation = pd.read_csv(DATA / "optimized_violations.csv")
+    confirmed = int((validation["Status"] == "VIOLATION").sum()) if "Status" in validation else 0
+    unverified = int((validation["Status"] == "UNVERIFIED").sum()) if "Status" in validation else 0
+    st.metric("Confirmed violations", confirmed)
+    st.metric("Unverified checks", unverified)
+    if unverified:
+        st.warning(
+            "Unverified checks are not proof of compliance. Product hazard, "
+            "handling, or stock data may be missing; review the saved validation "
+            "reports before treating this layout as operationally safe."
+        )
 
 # Show the strongest retained SKU affinity pairs.
 st.subheader("Affinity pairs")
