@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from src.operational_data import OperationalMetadataError, apply_operational_metadata
-from scripts.validate_saved_layouts import operational_metadata_gaps
+from scripts.validate_saved_layouts import operational_metadata_gaps, operational_metadata_gap_rows
 
 
 def _sku_master():
@@ -35,6 +35,9 @@ def test_absent_overlay_preserves_unknown_values_and_reports_simulation_mode(tmp
     assert master["Inventory_Units"].isna().all()
     assert set(master["Hazard_Class"]) == {"UNSPECIFIED"}
     assert audit["overlay_found"] is False
+    gaps = operational_metadata_gap_rows(master)
+    assert len(gaps) == 2
+    assert "Inventory_Units" in gaps.iloc[0].Missing_Fields
 
 
 def test_valid_operational_overlay_applies_values_and_provenance(tmp_path):
@@ -120,3 +123,4 @@ def test_zero_on_hand_is_valid_and_can_be_recorded_with_provenance(tmp_path):
     assigned["Safety_Verified_At"] = "2026-10-20"
     assigned["Safety_Data_Source"] = "approved register"
     assert all(value == 0 for value in operational_metadata_gaps(assigned).values())
+    assert operational_metadata_gap_rows(assigned).empty
