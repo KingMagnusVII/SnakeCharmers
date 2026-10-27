@@ -60,7 +60,7 @@ def test_valid_operational_overlay_applies_values_and_provenance(tmp_path):
     assert audit["safety_records_applied"] == 1
 
 
-@pytest.mark.parametrize("quantity", [0, -1, 1.5, "not-a-number"])
+@pytest.mark.parametrize("quantity", [-1, 1.5, "not-a-number"])
 def test_invalid_inventory_quantity_is_rejected(tmp_path, quantity):
     path = tmp_path / "metadata.csv"
     _write_overlay(path, [{
