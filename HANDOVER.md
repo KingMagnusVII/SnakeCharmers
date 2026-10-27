@@ -6,7 +6,7 @@ The repository contains an end-to-end warehouse-slotting prototype: Olist data p
 
 **Current branch:** `Magnus`
 
-**Important:** The latest GitHub commits for validation reporting and missing-data metrics were made directly on this branch. They still need to be pulled and tested in the recipient's local environment before this handover can be called fully verified.
+**Verification record (2026-10-28):** The maintainer pulled the latest validation and missing-data metric changes, ran the pipeline on Windows, and reported 25 passing tests, successful saved-layout validation, 0 confirmed violations, and 600 unverified checks per layout. GitHub Actions also passed on the latest documentation commit. The Streamlit dashboard should still be opened once as a final visual smoke test on the handover machine.
 
 ## Run and verify (Windows PowerShell)
 
@@ -55,7 +55,7 @@ The pipeline requires the Olist source CSVs in `data/raw/`. If they are missing,
 - **Confirmed violations** are checks explicitly marked `VIOLATION`.
 - **Unverified checks** indicate missing/unknown data or checks that cannot be established from available inputs. They are not confirmed violations, but they also are not proof of safety.
 
-A previous local run (before the most recent missing-attribute metric additions) reported 24 passing tests, 500 simulated orders, 494 complete routes for both strategies, and route distance decreasing from 13,191.2 m (baseline) to 11,591.6 m (optimized), about 12.13%. Treat these as historical results only; rerun the current branch and use the newly generated report for final claims.
+The latest local run reported 25 passing tests in 9.00 seconds. It simulated 500 orders, with 494 complete routes for each strategy. Baseline distance was 13,191.2 m and optimized distance was 11,591.6 m, a reduction of 1,599.6 m (about 12.13%). Estimated total time decreased from 275.88 to 254.55 minutes. All 200 selected SKUs were allocated. Both layouts had 0 confirmed violations and 600 unverified checks. Pipeline runtime was 92.13 seconds. These results are simulation outputs, not measured warehouse performance.
 
 ## Known limitations / do not overclaim
 
