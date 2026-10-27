@@ -1,10 +1,11 @@
 import pandas as pd
 
 from src.affinity_analysis import compute_affinity
-from src.baseline import allocate_baseline
+from src.baseline import allocate_baseline, select_feasible_candidates, select_order_coverage_candidates
 from src.evaluation import compare, evaluate
 from src.feasibility import fits_product, validate_layout
-from src.optimizer import optimize_layout
+from src import optimizer
+from src.optimizer import improve_layout_by_route_distance, optimize_layout
 from src.warehouse_generator import generate_warehouse
 from scripts.run_pipeline import _validation_summary
 
@@ -298,3 +299,97 @@ def test_baseline_does_not_overload_aggregate_rack_capacity():
     assert excluded.iloc[0]["Reason"] == "no_remaining_feasible_location"
     validation = validate_layout(baseline, profile, locations, CONFIG)
     assert "aggregate_rack_load" not in set(validation.loc[validation.Status == "VIOLATION", "Rule"])
+
+
+def test_feasible_selector_skips_impossible_high_demand_skus_before_cap():
+    profile = pd.DataFrame([
+        {
+            "SKU_ID": "impossible-high-demand",
+            "Width_cm": 20, "Height_cm": 20, "Depth_cm": 20,
+            "Weight_kg": 1, "Volume_cm3": 8000,
+            "Recorded_Order_Lines": 100,
+            "Physical_Metadata_Usable": True, "ABC_Class": "A",
+        },
+        {
+            "SKU_ID": "feasible-a",
+            "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5,
+            "Weight_kg": 1, "Volume_cm3": 125,
+            "Recorded_Order_Lines": 10,
+            "Physical_Metadata_Usable": True, "ABC_Class": "A",
+        },
+        {
+            "SKU_ID": "feasible-b",
+            "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5,
+            "Weight_kg": 1, "Volume_cm3": 125,
+            "Recorded_Order_Lines": 9,
+            "Physical_Metadata_Usable": True, "ABC_Class": "B",
+        },
+    ])
+
+    selected = select_feasible_candidates(
+        profile, _locations(), {**CONFIG, "max_active_skus": 2}
+    )
+
+    assert selected.SKU_ID.tolist() == ["feasible-a", "feasible-b"]
+
+
+def test_route_refinement_accepts_only_a_feasible_distance_improvement(monkeypatch):
+    profile = _skus().copy()
+    locations = _locations().copy()
+    locations["Shelf_Max_Load_kg"] = 100
+    locations["Rack_Max_Load_kg"] = 100
+    layout = pd.DataFrame([
+        {"SKU_ID": "a", "Location_ID": "L1"},
+        {"SKU_ID": "b", "Location_ID": "L2"},
+    ])
+
+    def fake_route_orders(orders, candidate, candidate_locations, max_orders=500):
+        # The mocked route objective improves when SKU a is moved to L2.
+        distance = 5.0 if candidate.loc[candidate.SKU_ID == "a", "Location_ID"].item() == "L2" else 10.0
+        return pd.DataFrame({"Distance_m": [distance]})
+
+    monkeypatch.setattr(optimizer, "route_orders", fake_route_orders)
+    refined, info = improve_layout_by_route_distance(
+        profile,
+        locations,
+        layout,
+        pd.DataFrame({"Order_ID": ["o1"], "SKU_ID": ["a"]}),
+        CONFIG,
+        max_swap_attempts=10,
+        max_passes=1,
+    )
+
+    assert refined.loc[refined.SKU_ID == "a", "Location_ID"].item() == "L2"
+    assert info["starting_distance_m"] == 10.0
+    assert info["final_distance_m"] == 5.0
+    assert info["accepted_swaps"] == 1
+    validation = validate_layout(refined, profile, locations, CONFIG)
+    assert not (validation.Status == "VIOLATION").any()
+
+
+def test_route_refinement_respects_attempt_limit(monkeypatch):
+    profile = _skus().copy()
+    locations = _locations().copy()
+    locations["Shelf_Max_Load_kg"] = 100
+    locations["Rack_Max_Load_kg"] = 100
+    layout = pd.DataFrame([
+        {"SKU_ID": "a", "Location_ID": "L1"},
+        {"SKU_ID": "b", "Location_ID": "L2"},
+    ])
+
+    def fake_route_orders(orders, candidate, candidate_locations, max_orders=500):
+        return pd.DataFrame({"Distance_m": [10.0]})
+
+    monkeypatch.setattr(optimizer, "route_orders", fake_route_orders)
+    _, info = improve_layout_by_route_distance(
+        profile,
+        locations,
+        layout,
+        pd.DataFrame({"Order_ID": ["o1"], "SKU_ID": ["a"]}),
+        CONFIG,
+        max_swap_attempts=1,
+        max_passes=3,
+    )
+
+    assert info["attempted_swaps"] == 1
+    assert info["search_terminated_by_limit"] is True
