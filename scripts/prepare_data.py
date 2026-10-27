@@ -22,6 +22,7 @@ def main() -> int:
         return 1
 
     orders, skus = normalize_olist(tables)
+    metadata_audit = skus.attrs.get("operational_metadata_audit", {"overlay_found": False})
     locations = generate_warehouse()
     outputs = {
         "orders.csv": orders,
@@ -33,8 +34,9 @@ def main() -> int:
         frame.to_csv(path, index=False)
         print(f"{filename}: {len(frame):,} rows -> {path.relative_to(PROJECT_ROOT)}")
 
-    print("\nAssumptions: Quantity=1 is a per-order-item proxy; current Inventory_Units remain blank.")
-    print("Hazard/handling attributes are unspecified. Topology and distances are synthetic.")
+    print("\nOperational metadata overlay: " + str(metadata_audit))
+    print("Assumptions: Quantity=1 is a per-order-item proxy. Missing inventory uses simulation fallback only.")
+    print("Hazard/handling attributes remain unverified unless supplied with provenance. Topology and distances are synthetic.")
     return 0
 
 

@@ -100,6 +100,7 @@ def main() -> None:
     )
     tables = load_olist_raw(ROOT / "data" / "raw")
     orders, skus = normalize_olist(tables)
+    metadata_audit = skus.attrs.get("operational_metadata_audit", {"overlay_found": False})
     locations = generate_warehouse()
 
     orders.to_csv(out / "orders.csv", index=False)
@@ -186,6 +187,10 @@ def main() -> None:
         "# Data foundation audit\n\n"
         "Verified raw tables, normalized schemas, "
         f"{len(locations)} generated warehouse locations, and deterministic inputs.\n\n"
+        "Operational metadata overlay audit:\n\n"
+        "```json\n"
+        + json.dumps(metadata_audit, indent=2, default=str)
+        + "\n```\n\n"
         "```json\n"
         + json.dumps(quality, indent=2, default=str)
         + "\n```\n",

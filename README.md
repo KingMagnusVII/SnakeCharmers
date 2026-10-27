@@ -61,6 +61,52 @@ The following original files are **not currently read by the pipeline**: `olist_
 - The configured `representative_inventory_units = 1` is a **simulation fallback**, not an observed quantity. Validation still marks the corresponding inventory checks as `UNVERIFIED`.
 - Do not infer hazard class, safe handling, or storage compatibility from a product category name.
 
+## Resolving inventory and safety-data gaps
+
+The Olist dataset is historical sales data, not a warehouse management system. It cannot tell us current on-hand stock, verified hazard classifications, handling requirements, or whether a real rack/floor is rated for the modeled load. The pipeline therefore leaves those attributes unknown instead of inventing them. The default one-unit representative-stock value is for simulation only.
+
+### Add reviewed operational SKU data
+
+1. Create the ignored input directory and copy the blank template (the template contains only a header row):
+
+```powershell
+New-Item -ItemType Directory -Force data\\input | Out-Null
+Copy-Item templates\\sku_operational_metadata_template.csv data\\input\\sku_operational_metadata.csv
+```
+
+The data/input/ directory is intentionally git-ignored because it may contain sensitive inventory and safety information.
+2. Add one row per SKU you can verify. SKU_ID must exactly match the Olist product ID in sku_master.csv. Leave fields blank when you do not have trustworthy data; do not guess.
+3. For a supplied Inventory_Units, enter the current whole-number on-hand quantity (zero is valid), the snapshot timestamp in Inventory_Snapshot_At, and the system/report used in Inventory_Data_Source.
+4. For supplied Hazard_Class or Handling_Type, enter the classification approved for that product and complete Safety_Verified_By, Safety_Verified_At, and Safety_Data_Source. Use values such as NONE or NORMAL only when the responsible source explicitly confirms them. UNKNOWN and UNSPECIFIED are not accepted as reviewed values.
+5. Re-run data preparation and the pipeline so the overlay is merged into the generated SKU master:
+
+```powershell
+.venv\Scripts\python.exe -m scripts.prepare_data
+.venv\Scripts\python.exe -m scripts.run_pipeline
+.venv\Scripts\python.exe scripts\validate_saved_layouts.py
+```
+
+The data-foundation audit records whether the overlay was found and how many inventory and safety records were applied. Invalid quantities, duplicate IDs, unknown SKUs, missing provenance, and invalid dates stop preparation with an actionable error.
+
+### Require complete metadata before operational review
+
+```powershell
+.venv\Scripts\python.exe scripts\validate_saved_layouts.py --strict-operational-data
+```
+
+The strict check exits with code 2 when any allocated SKU is missing a non-negative inventory count, non-placeholder hazard/handling classifications, or the required provenance fields. A successful check means the SKU metadata is complete enough for the next review step; **it is not a safety certification and does not prove the warehouse geometry, rack ratings, compatibility policy, fire controls, aisle clearances, or ergonomics are safe**. Those must be verified against the actual facility and reviewed by the responsible warehouse/safety owner.
+
+The ordinary validator remains available for simulation runs and continues to report missing data as UNVERIFIED. Do not change representative_inventory_units to make missing stock appear known.
+
+### Remaining real-world requirements
+
+- **Inventory:** connect a WMS/ERP snapshot with a timestamp, unit of measure, SKU identity, and a documented reconciliation process. Historical demand is not inventory. Confirm whether the modeled quantity means eaches, cases, pallets, or another handling unit before using capacity calculations.
+- **Product safety:** use an approved product master/SDS or internal safety register for hazard class, handling method, storage restrictions, and any incompatibilities. A product category is not evidence of chemical compatibility.
+- **Facility constraints:** replace synthetic coordinates, bin sizes, and load limits with measured locations and verified rack/shelf/floor ratings. Add real aisle/exit clearances, access restrictions, and site-approved storage rules.
+- **Operational sign-off:** have the warehouse owner validate the inputs and rules before any generated allocation is used to store or move physical goods.
+
+These controls align with general warehouse-storage principles such as respecting rated loads, segregating incompatible materials, maintaining clear aisles, and preventing unstable storage; applicability and detailed requirements depend on the actual jurisdiction and facility. See [OSHA warehouse hazards and solutions](https://www.osha.gov/warehousing/hazards-solutions) and [OSHA general storage requirements](https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.250).
+
 ## Current AI / optimization pipeline
 
 There are two distinct components: (1) a supervised **Ridge regression demand forecast**, and (2) a rule/heuristic-based **slotting optimizer**. The second component is not itself a trained AI model.
