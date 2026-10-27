@@ -466,10 +466,13 @@ def test_order_coverage_selector_prefers_skus_that_complete_whole_orders():
         {"SKU_ID": "c", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1,
          "Volume_cm3": 125, "Recorded_Order_Lines": 1, "Distinct_Orders": 1,
          "Physical_Metadata_Usable": True, "ABC_Class": "B"},
+        {"SKU_ID": "d", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1,
+         "Volume_cm3": 125, "Recorded_Order_Lines": 1, "Distinct_Orders": 1,
+         "Physical_Metadata_Usable": True, "ABC_Class": "B"},
     ])
     orders = pd.DataFrame({
-        "Order_ID": ["o1", "o1", "o2", "o2", "o3"],
-        "SKU_ID": ["a", "b", "a", "b", "c"],
+        "Order_ID": ["o1", "o1", "o2", "o2", "o3", "o3"],
+        "SKU_ID": ["a", "b", "a", "b", "c", "d"],
     })
 
     selected = select_order_coverage_candidates(
