@@ -103,6 +103,47 @@ def generate_warehouse(config_path: Path = DEFAULT_CONFIG) -> pd.DataFrame:
                         }
                     )
 
+    # Add explicitly configured oversized slots in a separate storage zone.
+    # Each slot has its own rack so aggregate rack-load checks remain independent.
+    for slot in config.get("oversized_storage_locations", []):
+        dims = {
+            "width": float(slot["dimensions_cm"]["width"]),
+            "height": float(slot["dimensions_cm"]["height"]),
+            "depth": float(slot["dimensions_cm"]["depth"]),
+        }
+        x = float(slot["x_m"])
+        y = float(slot["y_m"])
+        volume = dims["width"] * dims["height"] * dims["depth"]
+        rows.append(
+            {
+                "Location_ID": str(slot["location_id"]),
+                "Zone": "OVERSIZED",
+                "Aisle_Number": None,
+                "Rack_ID": str(slot["rack_id"]),
+                "Bay": 1,
+                "Shelf_Level": 1,
+                "X_m": round(x, 3),
+                "Y_m": round(y, 3),
+                "Z_m": float(slot.get("z_m", 0.35)),
+                "Bin_Width_cm": dims["width"],
+                "Bin_Height_cm": dims["height"],
+                "Bin_Depth_cm": dims["depth"],
+                "Volumetric_Capacity_cm3": round(volume, 2),
+                "Max_Weight_Capacity_kg": float(slot["max_weight_capacity_kg"]),
+                "Shelf_Max_Load_kg": float(slot.get("shelf_max_load_kg", config["shelf_max_load_kg"])),
+                "Rack_Max_Load_kg": float(slot.get("rack_max_load_kg", config["rack_max_load_kg"])),
+                "Distance_to_Dispatch_Depot_m": round(
+                    abs(x - float(depot["x_m"])) + abs(y - float(depot["y_m"])),
+                    2,
+                ),
+                "Location_Type": "OVERSIZED",
+            }
+        )
+
+    # Mark ordinary bins explicitly so allocators can reserve oversized slots.
+    for row in rows:
+        row.setdefault("Location_Type", "STANDARD")
+
     # Convert all generated locations into a DataFrame.
     result = pd.DataFrame(rows)
 
