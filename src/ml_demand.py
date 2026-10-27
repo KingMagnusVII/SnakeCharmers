@@ -22,9 +22,12 @@ def forecast_next_week_demand(
     provide product-level context. A Ridge model keeps the stage deterministic
     and inexpensive enough for the hackathon pipeline.
     """
+    # Start every SKU at zero so the function still returns a complete profile
+    # when there is not enough historical data to train the model.
     result = profile.copy()
     result["Predicted_Next_Week_Demand"] = 0.0
 
+    # Only use order statuses configured as valid demand observations.
     scoped = orders.loc[
         orders["Order_Status"].isin(config.get("demand_statuses", ["delivered"]))
     ].copy()
@@ -33,7 +36,7 @@ def forecast_next_week_demand(
     if scoped.empty:
         return result, {"model": "ridge", "trained": False, "reason": "no_valid_timestamps"}
 
-    # Weekly demand series for every SKU, including zero-demand weeks.
+    # Convert individual orders into a weekly demand time series for each SKU.
     scoped["Week"] = scoped["Timestamp"].dt.to_period("W").dt.start_time
     weeks = pd.date_range(scoped["Week"].min(), scoped["Week"].max(), freq="7D")
     sku_ids = result["SKU_ID"].dropna().astype(str).unique()
@@ -41,10 +44,13 @@ def forecast_next_week_demand(
     observed = scoped.assign(SKU_ID=scoped["SKU_ID"].astype(str)).groupby(
         ["SKU_ID", "Week"], as_index=False
     ).size().rename(columns={"size": "Demand"})
+
+    # Fill missing SKU/week combinations with zero because no order means zero demand.
     series = grid.merge(observed, on=["SKU_ID", "Week"], how="left")
     series["Demand"] = series["Demand"].fillna(0.0)
     series = series.sort_values(["SKU_ID", "Week"], kind="mergesort")
 
+    # These lag and rolling features let the model learn from recent demand.
     grouped = series.groupby("SKU_ID", sort=False)["Demand"]
     series["Lag_1"] = grouped.shift(1)
     series["Lag_4"] = grouped.shift(4)
@@ -52,18 +58,22 @@ def forecast_next_week_demand(
     series["Historical_Mean"] = grouped.transform(lambda s: s.shift(1).expanding().mean())
     series["Week_Index"] = (series["Week"] - series["Week"].min()).dt.days / 7.0
 
+    # Add product category so products with different demand patterns can differ.
     categories = result[["SKU_ID", "Category"]].copy()
     categories["SKU_ID"] = categories["SKU_ID"].astype(str)
     series = series.merge(categories.drop_duplicates("SKU_ID"), on="SKU_ID", how="left")
     series = series.dropna(subset=["Lag_1", "Lag_4", "Rolling_4", "Historical_Mean"])
 
-    # Need enough history to learn a meaningful lag relationship.
+    # Avoid training on a tiny dataset where the learned relationship is unreliable.
     if len(series) < 20:
         return result, {"model": "ridge", "trained": False, "reason": "insufficient_training_rows"}
 
     features = ["Lag_1", "Lag_4", "Rolling_4", "Historical_Mean", "Week_Index", "Category"]
     numeric = features[:-1]
     categorical = ["Category"]
+
+    # Scale numeric features, fill missing values, and one-hot encode categories
+    # before passing everything to the Ridge regression model.
     preprocessor = ColumnTransformer(
         [
             ("numeric", Pipeline([
@@ -80,11 +90,15 @@ def forecast_next_week_demand(
         ("features", preprocessor),
         ("regressor", Ridge(alpha=1.0)),
     ])
+
+    # log1p reduces the influence of very large demand counts during training.
     model.fit(series[features], np.log1p(series["Demand"]))
 
     # Build one feature row representing the next week for every SKU.
     latest = series.sort_values("Week").groupby("SKU_ID", as_index=False).tail(1).copy()
     latest["Week_Index"] = latest["Week_Index"] + 1.0
+
+    # Reverse the log1p transformation and clamp predictions so demand cannot be negative.
     predictions = np.expm1(model.predict(latest[features])).clip(0.0)
     prediction_frame = pd.DataFrame({"SKU_ID": latest["SKU_ID"].values, "Predicted_Next_Week_Demand": predictions})
     result["SKU_ID"] = result["SKU_ID"].astype(str)
