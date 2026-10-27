@@ -453,3 +453,27 @@ def test_empty_route_simulation_preserves_output_schema():
 
     assert routes.empty
     assert routes.columns.tolist() == ["Order_ID", "Visited_SKUs", "Distance_m", "Complete"]
+
+
+def test_order_coverage_selector_prefers_skus_that_complete_whole_orders():
+    profile = pd.DataFrame([
+        {"SKU_ID": "a", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1,
+         "Volume_cm3": 125, "Recorded_Order_Lines": 2, "Distinct_Orders": 2,
+         "Physical_Metadata_Usable": True, "ABC_Class": "A"},
+        {"SKU_ID": "b", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1,
+         "Volume_cm3": 125, "Recorded_Order_Lines": 2, "Distinct_Orders": 2,
+         "Physical_Metadata_Usable": True, "ABC_Class": "A"},
+        {"SKU_ID": "c", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1,
+         "Volume_cm3": 125, "Recorded_Order_Lines": 1, "Distinct_Orders": 1,
+         "Physical_Metadata_Usable": True, "ABC_Class": "B"},
+    ])
+    orders = pd.DataFrame({
+        "Order_ID": ["o1", "o1", "o2", "o2", "o3"],
+        "SKU_ID": ["a", "b", "a", "b", "c"],
+    })
+
+    selected = select_order_coverage_candidates(
+        profile, _locations(), orders, {**CONFIG, "max_active_skus": 2}
+    )
+
+    assert set(selected.SKU_ID) == {"a", "b"}
