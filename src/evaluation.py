@@ -73,6 +73,11 @@ def evaluate(routes, layout, profile, locations, config):
     # Count recorded demand lines represented by the whole profile.
     order_lines = float(profile.Recorded_Order_Lines.sum())
 
+    # Missing product attributes remain visible as data-quality limitations.
+    unknown_hazard = profile_rows["Hazard_Class"].isna() | profile_rows["Hazard_Class"].astype(str).str.strip().str.upper().isin(["", "UNSPECIFIED", "UNKNOWN"])
+    unknown_handling = profile_rows["Handling_Type"].isna() | profile_rows["Handling_Type"].astype(str).str.strip().str.upper().isin(["", "UNSPECIFIED", "UNKNOWN"])
+    unknown_inventory = pd.to_numeric(profile_rows["Inventory_Units"], errors="coerce").isna()
+
     # Return all metrics in one dictionary for report generation.
     return {
         "orders_simulated": int(route_count),
@@ -105,9 +110,9 @@ def evaluate(routes, layout, profile, locations, config):
             if order_lines
             else 0.0
         ),
-        "unknown_hazard_attributes": int(
-            (profile_rows.Hazard_Class == "UNSPECIFIED").sum()
-        ),
+        "unknown_hazard_attributes": int(unknown_hazard.sum()),
+        "unknown_handling_attributes": int(unknown_handling.sum()),
+        "unknown_inventory_attributes": int(unknown_inventory.sum()),
     }
 
 
