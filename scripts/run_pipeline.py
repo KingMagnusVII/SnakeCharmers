@@ -114,8 +114,8 @@ def main() -> None:
 
     (reports / "data_foundation_audit.md").write_text(
         "# Data foundation audit\n\n"
-        "Verified raw tables, normalized schemas, 240 generated locations, "
-        "and deterministic inputs.\n\n"
+        "Verified raw tables, normalized schemas, "
+        f"{len(locations)} generated warehouse locations, and deterministic inputs.\n\n"
         "```json\n"
         + json.dumps(quality, indent=2, default=str)
         + "\n```\n",
