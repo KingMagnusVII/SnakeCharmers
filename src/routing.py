@@ -4,6 +4,28 @@ from __future__ import annotations  # Enables modern type annotations.
 import pandas as pd  # Provides DataFrame operations.
 
 
+def select_fully_allocatable_orders(orders, layout, max_orders=500):
+    """Select orders whose every SKU is present in the allocated assortment.
+
+    This creates a clearly scoped fulfillment cohort for comparing layouts.
+    Orders excluded from this cohort must still be measured separately against
+    the full source-order sample; they must not be silently counted as complete.
+    Pass max_orders=None to return every eligible order.
+    """
+    allocated_skus = set(layout["SKU_ID"].dropna())
+    eligible_ids = []
+    for order_id, group in orders.groupby("Order_ID", sort=True):
+        sku_values = group["SKU_ID"]
+        if sku_values.isna().any():
+            continue
+        order_skus = set(sku_values)
+        if order_skus and order_skus.issubset(allocated_skus):
+            eligible_ids.append(order_id)
+            if max_orders is not None and len(eligible_ids) >= max_orders:
+                break
+    return orders[orders["Order_ID"].isin(eligible_ids)].copy()
+
+
 def route_orders(orders, layout, locations, max_orders=500):
     """Build deterministic nearest-next-SKU routes using Manhattan distance."""
 
