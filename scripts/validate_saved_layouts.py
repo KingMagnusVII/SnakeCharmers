@@ -33,7 +33,7 @@ def _missing_text(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame.columns:
         return pd.Series(True, index=frame.index)
     return frame[column].isna() | frame[column].astype(str).str.strip().str.upper().isin(
-        ["", "UNKNOWN", "UNSPECIFIED", "N/A", "NA", "NONE"]
+        ["", "UNKNOWN", "UNSPECIFIED", "N/A", "NA"]
     )
 
 
