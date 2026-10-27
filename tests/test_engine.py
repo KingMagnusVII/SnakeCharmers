@@ -92,7 +92,7 @@ def test_invalid_representative_inventory_fallback_is_a_violation():
         assert len(invalid) == 1
         assert invalid.iloc[0].Status == "VIOLATION"
 
-    valid_config = {**CONFIG, "representative_inventory_units": 2}
+    valid_config = {**CONFIG, "representative_inventory_units": 1}
     valid_result = validate_layout(layout, skus, _locations(), valid_config)
     assumed = valid_result[valid_result.Rule == "inventory_units"]
     assert len(assumed) == 1
