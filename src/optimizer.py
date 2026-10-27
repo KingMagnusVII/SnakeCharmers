@@ -5,7 +5,7 @@ import math  # Provides stable logarithmic affinity weighting.
 
 import pandas as pd  # Provides DataFrame operations.
 
-from .feasibility import is_product_location_feasible  # Reuses placement constraints.
+from .feasibility import fits_product, is_product_location_feasible  # Reuses placement constraints.
 
 
 def _affinity_index(affinity: pd.DataFrame) -> dict[str, list[tuple[str, float]]]:
@@ -110,6 +110,19 @@ def optimize_layout(profile, locations, baseline, affinity, config):
     for row in baseline.itertuples(index=False):
         product = profile_by_sku.loc[row.SKU_ID]
         candidates = locations[~locations.Location_ID.isin(used)]
+
+        # Keep dedicated oversized slots available for SKUs that cannot fit a
+        # standard bin. Fall back naturally only when a SKU has no standard-bin fit.
+        if "Location_Type" in locations.columns:
+            standard_locations = locations[locations.Location_Type != "OVERSIZED"]
+            if not standard_locations.empty and standard_locations.apply(
+                lambda location: fits_product(
+                    product, location, bool(config.get("allow_rotations", True))
+                ),
+                axis=1,
+            ).any():
+                candidates = candidates[candidates.Location_Type != "OVERSIZED"]
+
         candidates = candidates[
             candidates.apply(
                 lambda location: is_product_location_feasible(product, location, config),

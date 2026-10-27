@@ -10,8 +10,54 @@
   "first_bay_y_m": 2.0,
   "dispatch_depot": {"x_m": 0.0, "y_m": 0.0, "z_m": 0.0},
   "bin_dimensions_cm": {"width": 40.0, "height": 30.0, "depth": 40.0},
+  "bin_dimensions_by_level": {
+    "1": {"width": 100.0, "height": 60.0, "depth": 60.0},
+    "2": {"width": 100.0, "height": 60.0, "depth": 60.0}
+  },
   "location_weight_capacity_by_level_kg": {"1": 40.0, "2": 35.0, "3": 30.0, "4": 20.0},
   "shelf_max_load_kg": 200.0,
   "rack_max_load_kg": 700.0,
+  "oversized_storage_locations": [
+    {
+      "location_id": "OVR-AUTO-01",
+      "rack_id": "OVR-RACK-01",
+      "dimensions_cm": {"width": 70.0, "height": 20.0, "depth": 70.0},
+      "max_weight_capacity_kg": 40.0,
+      "shelf_max_load_kg": 200.0,
+      "rack_max_load_kg": 700.0,
+      "x_m": 21.0,
+      "y_m": 2.0
+    },
+    {
+      "location_id": "OVR-AUTO-02",
+      "rack_id": "OVR-RACK-02",
+      "dimensions_cm": {"width": 70.0, "height": 20.0, "depth": 70.0},
+      "max_weight_capacity_kg": 40.0,
+      "shelf_max_load_kg": 200.0,
+      "rack_max_load_kg": 700.0,
+      "x_m": 21.0,
+      "y_m": 3.2
+    },
+    {
+      "location_id": "OVR-AUTO-03",
+      "rack_id": "OVR-RACK-03",
+      "dimensions_cm": {"width": 70.0, "height": 20.0, "depth": 70.0},
+      "max_weight_capacity_kg": 40.0,
+      "shelf_max_load_kg": 200.0,
+      "rack_max_load_kg": 700.0,
+      "x_m": 21.0,
+      "y_m": 4.4
+    },
+    {
+      "location_id": "OVR-LONG-01",
+      "rack_id": "OVR-RACK-04",
+      "dimensions_cm": {"width": 110.0, "height": 20.0, "depth": 20.0},
+      "max_weight_capacity_kg": 40.0,
+      "shelf_max_load_kg": 200.0,
+      "rack_max_load_kg": 700.0,
+      "x_m": 21.0,
+      "y_m": 5.6
+    }
+  ],
   "zone_aisle_ranges": {"A": [1, 2], "B": [3, 4], "C": [5, 6]}
 }

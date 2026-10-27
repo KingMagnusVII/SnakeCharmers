@@ -6,6 +6,7 @@ from src.evaluation import compare, evaluate
 from src.feasibility import fits_product, validate_layout
 from src.optimizer import optimize_layout
 from src.warehouse_generator import generate_warehouse
+from scripts.run_pipeline import _validation_summary
 
 
 CONFIG = {
@@ -39,7 +40,7 @@ def _rules(layout, skus=None, locations=None, config=CONFIG):
 
 
 def test_warehouse_deterministic_count():
-    assert len(generate_warehouse()) == 240
+    assert len(generate_warehouse()) == 244
     assert generate_warehouse().equals(generate_warehouse())
 
 
@@ -170,18 +171,91 @@ def test_optimizer_uses_affinity_to_prefer_nearby_related_skus():
     assert with_affinity.loc[with_affinity.SKU_ID == "b", "Location_ID"].iloc[0] == "L2"
 
 
+def test_baseline_reports_products_that_fit_no_bin_dimensions():
+    # The product has usable metadata but is too large for every test bin.
+    profile = _skus().iloc[[0]].copy()
+    profile.loc[profile.index[0], ["Width_cm", "Height_cm", "Depth_cm"]] = [50, 50, 50]
+    _, excluded = allocate_baseline(
+        profile,
+        _locations(),
+        {**CONFIG, "max_active_skus": 10},
+    )
+    assert len(excluded) == 1
+    assert excluded.iloc[0]["Reason"] == "does_not_fit_any_bin_dimensions"
+
+
 def test_evaluation_arithmetic_zero_distance_and_incomplete_orders():
     profile, locations = _skus(), _locations()
     layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
     routes = pd.DataFrame({"Distance_m": [0.0, 10.0], "Complete": [True, "false"]})
-    metrics = evaluate(routes, layout, profile, locations, {"walking_speed_m_per_min": 10, "pick_handling_seconds": 0})
+    metrics = evaluate(
+        routes,
+        layout,
+        profile,
+        locations,
+        {
+            "walking_speed_m_per_min": 10,
+            "pick_handling_seconds": 0,
+            "max_active_skus": 1,
+        },
+    )
     assert metrics["orders_simulated"] == 2
     assert metrics["complete_orders"] == 1
     assert metrics["total_distance_m"] == 10
     assert metrics["average_distance_m"] == 5
     assert metrics["allocation_coverage"] == 0.5
+    assert metrics["active_assortment_sku_count"] == 1
+    assert metrics["active_assortment_allocated_sku_count"] == 1
+    assert metrics["active_assortment_unallocated_sku_count"] == 0
+    assert metrics["active_assortment_coverage"] == 1.0
     assert metrics["order_line_coverage"] == 0.6
     empty_metrics = evaluate(pd.DataFrame(columns=["Distance_m", "Complete"]), layout, profile, locations, {})
     assert empty_metrics["average_distance_m"] == 0.0
     comparison = compare({"total_distance_m": 10.0}, {"total_distance_m": 7.5})
     assert comparison.iloc[0].Change == -2.5
+
+
+def test_oversized_storage_fits_and_allocates_four_outlier_skus():
+    locations = generate_warehouse()
+    oversized = locations[locations.Location_Type == "OVERSIZED"]
+    assert len(locations) == 244
+    assert set(oversized.Location_ID) == {
+        "OVR-AUTO-01", "OVR-AUTO-02", "OVR-AUTO-03", "OVR-LONG-01"
+    }
+
+    # Three wide automotive products and one long stationery product match
+    # the real outlier dimensions found in the active assortment.
+    profile = pd.DataFrame([
+        {"SKU_ID": "auto-67", "Width_cm": 67, "Height_cm": 10, "Depth_cm": 67, "Weight_kg": 4.105, "Inventory_Units": 1, "Category": "automotivo", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 44890, "Recorded_Order_Lines": 4, "Physical_Metadata_Usable": True, "ABC_Class": "A"},
+        {"SKU_ID": "auto-65", "Width_cm": 65, "Height_cm": 11, "Depth_cm": 65, "Weight_kg": 5.950, "Inventory_Units": 1, "Category": "automotivo", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 46475, "Recorded_Order_Lines": 3, "Physical_Metadata_Usable": True, "ABC_Class": "A"},
+        {"SKU_ID": "auto-61", "Width_cm": 61, "Height_cm": 14, "Depth_cm": 61, "Weight_kg": 7.625, "Inventory_Units": 1, "Category": "automotivo", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 52094, "Recorded_Order_Lines": 2, "Physical_Metadata_Usable": True, "ABC_Class": "B"},
+        {"SKU_ID": "long-101", "Width_cm": 15, "Height_cm": 15, "Depth_cm": 101, "Weight_kg": 0.750, "Inventory_Units": 1, "Category": "papelaria", "Hazard_Class": "NONE", "Handling_Type": "NORMAL", "Volume_cm3": 22725, "Recorded_Order_Lines": 1, "Physical_Metadata_Usable": True, "ABC_Class": "C"},
+    ])
+    baseline, excluded = allocate_baseline(
+        profile, locations, {**CONFIG, "max_active_skus": 4}
+    )
+    assert excluded.empty
+    assert len(baseline) == 4
+    assert set(baseline.Location_ID).issubset(set(oversized.Location_ID))
+    validation = validate_layout(baseline, profile, locations, CONFIG)
+    assert not (validation.Status == "VIOLATION").any()
+
+
+def test_validation_summary_separates_violations_from_unverified_checks():
+    results = pd.DataFrame({"Status": ["VIOLATION", "UNVERIFIED", "UNVERIFIED"]})
+    assert _validation_summary(results) == {"known_violations": 1, "unverified_checks": 2}
+    assert _validation_summary(pd.DataFrame(columns=["Status"])) == {
+        "known_violations": 0,
+        "unverified_checks": 0,
+    }
+
+
+def test_evaluation_exposes_missing_safety_and_inventory_attributes():
+    profile = _skus()
+    profile.loc[profile.SKU_ID == "a", ["Hazard_Class", "Handling_Type", "Inventory_Units"]] = ["UNSPECIFIED", "UNKNOWN", None]
+    locations = _locations()
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    metrics = evaluate(pd.DataFrame(columns=["Distance_m", "Complete"]), layout, profile, locations, CONFIG)
+    assert metrics["unknown_hazard_attributes"] == 1
+    assert metrics["unknown_handling_attributes"] == 1
+    assert metrics["unknown_inventory_attributes"] == 1
