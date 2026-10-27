@@ -77,7 +77,6 @@ def main() -> None:
 
     # Calculate SKU-pair co-occurrence for the active assortment.
     affinity = compute_affinity(scoped, active)
-    affinity.to_csv(out / "affinity_pairs.csv", index=False)
 
     # Create the deterministic baseline allocation and record excluded SKUs.
     baseline, excluded = allocate_baseline(profile, locations, config)

@@ -6,19 +6,23 @@ from numbers import Real  # Lets comparison identify numeric metric values.
 import pandas as pd  # Provides DataFrame operations.
 
 
-def _complete_orders(routes: pd.DataFrame) -> int:
-    """Count true completion flags consistently for bool or CSV string inputs."""
+def _completion_mask(routes: pd.DataFrame) -> pd.Series:
+    """Return true for completed routes, including CSV-loaded string flags."""
 
     # Empty route tables cannot contain completed orders.
     if routes.empty or "Complete" not in routes:
-        return 0
+        return pd.Series(False, index=routes.index)
 
     # Accept both Python booleans and strings loaded back from CSV.
-    return int(
-        routes["Complete"]
-        .map(lambda value: value is True or str(value).strip().lower() == "true")
-        .sum()
+    return routes["Complete"].map(
+        lambda value: value is True or str(value).strip().lower() == "true"
     )
+
+
+def _complete_orders(routes: pd.DataFrame) -> int:
+    """Count true completion flags consistently for bool or CSV string inputs."""
+
+    return int(_completion_mask(routes).sum())
 
 
 def evaluate(routes, layout, profile, locations, config):
@@ -29,6 +33,14 @@ def evaluate(routes, layout, profile, locations, config):
 
     # Sum route distance, using zero for an empty simulation.
     distance = float(routes["Distance_m"].sum()) if route_count else 0.0
+    completion_mask = _completion_mask(routes)
+    complete_orders = int(completion_mask.sum())
+    incomplete_orders = route_count - complete_orders
+    complete_distance = (
+        float(routes.loc[completion_mask, "Distance_m"].sum())
+        if complete_orders
+        else 0.0
+    )
 
     # Keep only warehouse locations used by the supplied layout.
     selected = locations[locations.Location_ID.isin(layout.Location_ID)]
@@ -51,9 +63,15 @@ def evaluate(routes, layout, profile, locations, config):
     # Return all metrics in one dictionary for report generation.
     return {
         "orders_simulated": int(route_count),
-        "complete_orders": _complete_orders(routes),
+        "complete_orders": complete_orders,
+        "incomplete_orders": incomplete_orders,
+        "completion_rate": complete_orders / route_count if route_count else 0.0,
         "total_distance_m": distance,
         "average_distance_m": distance / route_count if route_count else 0.0,
+        # No completed orders uses 0.0 because a completed-order average is undefined.
+        "average_distance_complete_orders_m": (
+            complete_distance / complete_orders if complete_orders else 0.0
+        ),
         "estimated_time_min": (
             distance / config.get("walking_speed_m_per_min", 75)
             + route_count * config.get("pick_handling_seconds", 12) / 60

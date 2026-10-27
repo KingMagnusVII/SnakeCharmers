@@ -27,6 +27,8 @@ def _physical_metadata(skus: pd.DataFrame) -> pd.DataFrame:
 def build_demand_profile(orders: pd.DataFrame, skus: pd.DataFrame, config: dict) -> tuple[pd.DataFrame, dict]:
     """Build an all-SKU profile whose Pareto denominator is SKU-order incidences."""
     scoped = select_demand_scope(orders, config.get("demand_statuses", ["delivered"]))
+    duplicate_sku_master_records = int(skus["SKU_ID"].duplicated().sum())
+    # Keep the first duplicate deterministically, but expose the data-quality issue.
     master = _physical_metadata(skus).drop_duplicates("SKU_ID", keep="first")
     observed = scoped.loc[scoped["SKU_ID"].notna()].groupby("SKU_ID", as_index=False).agg(
         Distinct_Orders=("Order_ID", "nunique"), Recorded_Order_Lines=("SKU_ID", "size"))
@@ -48,7 +50,7 @@ def build_demand_profile(orders: pd.DataFrame, skus: pd.DataFrame, config: dict)
         return "A" if row.Cumulative_Demand_Share <= thresholds["A"] else "B" if row.Cumulative_Demand_Share <= thresholds["B"] else "C"
     profile["ABC_Class"] = profile.apply(classify, axis=1)
     profile["Demand_Metric"] = "distinct_orders_containing_sku"
-    return profile, {"input_order_lines": int(len(orders)), "scoped_order_lines": int(len(scoped)), "scoped_distinct_orders": int(scoped["Order_ID"].nunique()), "sku_order_incidence_denominator": denominator, "positive_demand_skus": int(profile["Observed_Demand"].sum()), "zero_demand_skus": int((~profile["Observed_Demand"]).sum()), "unmatched_observed_skus": int(((profile["Product_Metadata_Match"] == "left_only") & profile["Observed_Demand"]).sum()), "products_missing_or_invalid_dimensions": int((~master["Dimensions_Valid"]).sum()), "products_missing_or_invalid_weight": int((~master["Weight_Valid"]).sum())}
+    return profile, {"input_order_lines": int(len(orders)), "scoped_order_lines": int(len(scoped)), "scoped_distinct_orders": int(scoped["Order_ID"].nunique()), "sku_order_incidence_denominator": denominator, "positive_demand_skus": int(profile["Observed_Demand"].sum()), "zero_demand_skus": int((~profile["Observed_Demand"]).sum()), "unmatched_observed_skus": int(((profile["Product_Metadata_Match"] == "left_only") & profile["Observed_Demand"]).sum()), "duplicate_sku_master_records": duplicate_sku_master_records, "products_missing_or_invalid_dimensions": int((~master["Dimensions_Valid"]).sum()), "products_missing_or_invalid_weight": int((~master["Weight_Valid"]).sum())}
 
 
 def analyze_demand(orders: pd.DataFrame, skus: pd.DataFrame, config: dict) -> tuple[pd.DataFrame, dict]:

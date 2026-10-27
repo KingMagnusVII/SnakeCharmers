@@ -1,8 +1,12 @@
+import ast
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
 from src.affinity_analysis import compute_affinity
 from src.demand_analysis import build_demand_profile, product_dimensional_fit
+from scripts.run_eda import _affinity_input_quality
 
 
 def test_demand_uses_distinct_orders_and_keeps_zero_and_unmatched_skus():
@@ -13,6 +17,30 @@ def test_demand_uses_distinct_orders_and_keeps_zero_and_unmatched_skus():
     assert profile.loc[profile.SKU_ID.eq("a"), "Recorded_Order_Lines"].item() == 3
     assert profile.loc[profile.SKU_ID.eq("zero"), "ABC_Class"].item() == "ZERO"
     assert quality["unmatched_observed_skus"] == 1
+
+
+def test_demand_reports_duplicate_sku_master_records_and_keeps_first_record():
+    orders = pd.DataFrame(
+        {"Order_ID": ["o1"], "SKU_ID": ["a"], "Order_Status": ["delivered"]}
+    )
+    skus = pd.DataFrame(
+        {
+            "SKU_ID": ["a", "a"],
+            "Width_cm": [1, 2],
+            "Height_cm": [1, 2],
+            "Depth_cm": [1, 2],
+            "Weight_kg": [1, 2],
+        }
+    )
+
+    profile, quality = build_demand_profile(
+        orders,
+        skus,
+        {"demand_statuses": ["delivered"], "abc_thresholds": {"A": 0.8, "B": 0.95}},
+    )
+
+    assert quality["duplicate_sku_master_records"] == 1
+    assert profile.loc[profile.SKU_ID.eq("a"), "Width_cm"].item() == 1
 
 
 def test_abc_boundary_and_deterministic_tie_breaking():
@@ -35,6 +63,49 @@ def test_affinity_metrics_filtering_deduplication_and_empty_input():
     assert row.Lift == pytest.approx(1)
     assert compute_affinity(orders, min_pair_count=3).empty
     assert compute_affinity(pd.DataFrame(columns=["Order_ID", "SKU_ID"])).empty
+
+
+def test_affinity_input_quality_counts_missing_identifiers_without_double_counting():
+    scoped = pd.DataFrame(
+        {
+            "Order_ID": ["o1", "o2", None, "o3", None],
+            "SKU_ID": ["a", "b", "c", None, None],
+        }
+    )
+
+    quality = _affinity_input_quality(scoped)
+
+    assert quality == {
+        "input_rows": 5,
+        "rows_missing_order_id": 2,
+        "rows_missing_sku_id": 2,
+        "rows_missing_both_identifiers": 1,
+        "excluded_rows_missing_identifiers": 3,
+        "retained_rows": 2,
+    }
+    assert quality["retained_rows"] + quality["excluded_rows_missing_identifiers"] == quality["input_rows"]
+
+
+def test_pipeline_does_not_overwrite_eda_affinity_artifact():
+    pipeline_source = (
+        Path(__file__).resolve().parents[1] / "scripts" / "run_pipeline.py"
+    ).read_text(encoding="utf-8")
+    pipeline_tree = ast.parse(pipeline_source)
+
+    writes_eda_affinity = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "to_csv"
+        and any(
+            isinstance(argument, ast.Constant)
+            and argument.value == "affinity_pairs.csv"
+            for argument in node.args
+        )
+        for node in ast.walk(pipeline_tree)
+    )
+
+    assert "affinity = compute_affinity(scoped, active)" in pipeline_source
+    assert not writes_eda_affinity
 
 
 def test_dimensional_fit_honors_rotations_invalid_metadata_and_no_fit():

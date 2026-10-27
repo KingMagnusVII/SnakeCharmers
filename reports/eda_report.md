@@ -6,7 +6,7 @@ This EDA reads local Olist raw tables and normalized `data/processed/orders.csv`
 
 ## Quality and reconciliation
 
-    Raw source audit is in `eda_summary.json`: 0 item lines lack an order reference, 0 lack a product reference, and the normalized-line reconciliation delta is 0. The normalized order data has 0 missing/unparseable timestamps. The demand universe has 32,216 observed-demand SKUs, 735 zero-demand product-master SKUs, and 0 observed SKUs absent from the product master. Product placement cannot be assessed for 2 products with missing/invalid dimensions and 6 with missing/invalid weight.
+Raw source audit is in `eda_summary.json`: 0 item lines lack an order reference, 0 lack a product reference, and the normalized-line reconciliation delta is 0. The normalized order data has 0 missing/unparseable timestamps. The demand universe has 32,216 observed-demand SKUs, 735 zero-demand product-master SKUs, and 0 observed SKUs absent from the product master. Product placement cannot be assessed for 2 products with missing/invalid dimensions and 6 with missing/invalid weight.
 
 ## Demand and ABC/Pareto
 

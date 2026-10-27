@@ -21,9 +21,11 @@ def route_orders(orders, layout, locations, max_orders=500):
     records = []
 
     # Process orders in deterministic Order_ID order.
-    for order_id, group in orders.groupby("Order_ID", sort=True):
+    for order_number, (order_id, group) in enumerate(
+        orders.groupby("Order_ID", sort=True)
+    ):
         # Stop once the configured route sample size has been reached.
-        if len(records) >= max_orders:
+        if order_number >= max_orders:
             break
 
         # Deduplicate repeated SKU lines within the same order.
@@ -32,6 +34,14 @@ def route_orders(orders, layout, locations, max_orders=500):
         # Keep only SKUs that exist in the proposed layout.
         present = [sku for sku in skus if sku in loc.index]
         if not present:
+            records.append(
+                {
+                    "Order_ID": order_id,
+                    "Visited_SKUs": "",
+                    "Distance_m": 0.0,
+                    "Complete": False,
+                }
+            )
             continue
 
         # Start at the dispatch depot origin.
@@ -67,4 +77,7 @@ def route_orders(orders, layout, locations, max_orders=500):
         )
 
     # Convert all route records into a DataFrame for downstream evaluation.
-    return pd.DataFrame(records)
+    return pd.DataFrame(
+        records,
+        columns=["Order_ID", "Visited_SKUs", "Distance_m", "Complete"],
+    )
