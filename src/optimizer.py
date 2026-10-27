@@ -5,7 +5,7 @@ import math  # Provides stable logarithmic affinity weighting.
 
 import pandas as pd  # Provides DataFrame operations.
 
-from .feasibility import fits_product, is_product_location_feasible  # Reuses placement constraints.
+from .feasibility import fits_product, is_product_location_feasible, modeled_stock_load_kg, rack_load_fits  # Reuses placement constraints.
 
 
 def _affinity_index(affinity: pd.DataFrame) -> dict[str, list[tuple[str, float]]]:
@@ -83,6 +83,7 @@ def optimize_layout(profile, locations, baseline, affinity, config):
     placed_locations: dict[str, pd.Series] = {}
     rows = []
     used = set()
+    rack_loads: dict[str, float] = {}
 
     distance_weight = float(config.get("objective_weights", {}).get("distance", 1.0))
     affinity_weight = float(config.get("objective_weights", {}).get("affinity", 0.25))
@@ -125,7 +126,8 @@ def optimize_layout(profile, locations, baseline, affinity, config):
 
         candidates = candidates[
             candidates.apply(
-                lambda location: is_product_location_feasible(product, location, config),
+                lambda location: is_product_location_feasible(product, location, config)
+            and rack_load_fits(product, location, rack_loads, config),
                 axis=1,
             )
         ].copy()
@@ -155,6 +157,10 @@ def optimize_layout(profile, locations, baseline, affinity, config):
         candidates["score"] = candidates.apply(score, axis=1)
         location = candidates.sort_values(["score", "Location_ID"]).iloc[0]
         used.add(location.Location_ID)
+        rack_load = modeled_stock_load_kg(product, config)
+        if rack_load is not None:
+            rack_id = location.get("Rack_ID")
+            rack_loads[rack_id] = rack_loads.get(rack_id, 0.0) + rack_load
         placed_locations[row.SKU_ID] = location
 
         affinity_used = _affinity_score(
