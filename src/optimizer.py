@@ -73,7 +73,7 @@ def _affinity_score(
 
 
 def optimize_layout(profile, locations, baseline, affinity, config):
-    """Greedily reassign each SKU to a feasible location using distance and affinity."""
+    """Greedily reassign each SKU to a feasible location using ML, distance and affinity."""
 
     if baseline.empty:
         return baseline.copy(), {"iterations": 0}
@@ -90,6 +90,22 @@ def optimize_layout(profile, locations, baseline, affinity, config):
 
     max_distance = float(locations["Distance_to_Dispatch_Depot_m"].max()) if not locations.empty else 0.0
     max_distance = max(max_distance, 1.0)
+
+    # ML forecast now affects the optimized layout itself: high predicted-demand
+    # SKUs are placed first, giving them first access to the best feasible bins.
+    # The baseline order remains historical-demand based, so the two strategies
+    # can still be compared fairly.
+    if "Predicted_Next_Week_Demand" in profile.columns:
+        ml_priority = profile_by_sku["Predicted_Next_Week_Demand"].reindex(baseline.SKU_ID)
+        ml_priority = pd.to_numeric(ml_priority, errors="coerce").fillna(0.0)
+        baseline = baseline.assign(_ml_priority=baseline.SKU_ID.map(ml_priority))
+        baseline = baseline.sort_values(
+            ["_ml_priority", "SKU_ID"], ascending=[False, True]
+        ).drop(columns="_ml_priority")
+        ml_used = True
+    else:
+        # Keep the optimizer usable for older profiles that do not contain ML data.
+        ml_used = False
 
     for row in baseline.itertuples(index=False):
         product = profile_by_sku.loc[row.SKU_ID]
@@ -136,8 +152,10 @@ def optimize_layout(profile, locations, baseline, affinity, config):
             max_distance,
         )
         rationale = "feasible distance/ergonomic greedy placement"
+        if ml_used:
+            rationale += " with ML demand priority"
         if affinity_used > 0:
-            rationale += " with affinity-aware co-location"
+            rationale += " and affinity-aware co-location"
 
         rows.append(
             {
@@ -151,6 +169,7 @@ def optimize_layout(profile, locations, baseline, affinity, config):
     result = pd.DataFrame(rows)
     return result, {
         "iterations": 1,
-        "heuristic": "feasible distance/ergonomic greedy reassignment with affinity",
+        "heuristic": "feasible ML-priority distance/ergonomic greedy reassignment with affinity",
+        "ml_demand_priority_used": ml_used,
         "affinity_pairs_used": sum(1 for sku in affinity_index if sku in placed_locations),
     }
