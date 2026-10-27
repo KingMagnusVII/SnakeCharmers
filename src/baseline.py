@@ -133,7 +133,7 @@ def allocate_baseline(
     selected_ids = set(eligible.SKU_ID)
     for _, product in usable[~usable.SKU_ID.isin(selected_ids)].iterrows():
         if dimensional_fit.loc[product.SKU_ID, "Fit_Location_Count"] == 0:
-            excluded.append({"SKU_ID": product.SKU_ID, "Reason": "dimensional_infeasible"})
+            excluded.append({"SKU_ID": product.SKU_ID, "Reason": "does_not_fit_any_bin_dimensions"})
 
     # Place larger products first so they have the widest choice of bins.
     ordered = eligible.sort_values(
