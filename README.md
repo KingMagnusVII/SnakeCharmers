@@ -67,7 +67,14 @@ The Olist dataset is historical sales data, not a warehouse management system. I
 
 ### Add reviewed operational SKU data
 
-1. Copy templates/sku_operational_metadata_template.csv to data/input/sku_operational_metadata.csv. The data/input/ directory is intentionally git-ignored because it may contain sensitive inventory and safety information.
+1. Create the ignored input directory and copy the blank template (the template contains only a header row):
+
+```powershell
+New-Item -ItemType Directory -Force data\\input | Out-Null
+Copy-Item templates\\sku_operational_metadata_template.csv data\\input\\sku_operational_metadata.csv
+```
+
+The data/input/ directory is intentionally git-ignored because it may contain sensitive inventory and safety information.
 2. Add one row per SKU you can verify. SKU_ID must exactly match the Olist product ID in sku_master.csv. Leave fields blank when you do not have trustworthy data; do not guess.
 3. For a supplied Inventory_Units, enter the current whole-number on-hand quantity (zero is valid), the snapshot timestamp in Inventory_Snapshot_At, and the system/report used in Inventory_Data_Source.
 4. For supplied Hazard_Class or Handling_Type, enter the classification approved for that product and complete Safety_Verified_By, Safety_Verified_At, and Safety_Data_Source. Use values such as NONE or NORMAL only when the responsible source explicitly confirms them. UNKNOWN and UNSPECIFIED are not accepted as reviewed values.
