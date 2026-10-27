@@ -1,0 +1,11 @@
+# SnakeCharmers runtime and development dependencies.
+# Python 3.15-compatible pandas is required because pandas 2.x does not provide
+# the compatible wheels needed by this project's Python 3.15 environment.
+pandas>=3.0.6,<3.2
+numpy>=2.0.2,<3.0
+kaggle>=1.6
+networkx>=3.0
+matplotlib>=3.8
+plotly>=5.0
+streamlit>=1.30
+pytest>=8.0
