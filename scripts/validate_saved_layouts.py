@@ -59,6 +59,30 @@ def operational_metadata_gaps(assigned_skus: pd.DataFrame) -> dict[str, int]:
     }
 
 
+def operational_metadata_gap_rows(assigned_skus: pd.DataFrame) -> pd.DataFrame:
+    """Return one actionable row per SKU missing required operational metadata."""
+    rows = []
+    for _, sku in assigned_skus.iterrows():
+        missing = []
+        inventory = pd.to_numeric(pd.Series([sku.get("Inventory_Units")]), errors="coerce").iloc[0]
+        if pd.isna(inventory) or inventory < 0:
+            missing.append("Inventory_Units")
+        if _missing_text(pd.DataFrame([sku]), "Inventory_Snapshot_At").iloc[0]:
+            missing.append("Inventory_Snapshot_At")
+        if _missing_text(pd.DataFrame([sku]), "Inventory_Data_Source").iloc[0]:
+            missing.append("Inventory_Data_Source")
+        if _missing_text(pd.DataFrame([sku]), "Hazard_Class").iloc[0]:
+            missing.append("Hazard_Class")
+        if _missing_text(pd.DataFrame([sku]), "Handling_Type").iloc[0]:
+            missing.append("Handling_Type")
+        for column in ("Safety_Verified_By", "Safety_Verified_At", "Safety_Data_Source"):
+            if _missing_text(pd.DataFrame([sku]), column).iloc[0]:
+                missing.append(column)
+        if missing:
+            rows.append({"SKU_ID": sku.get("SKU_ID", ""), "Missing_Fields": ";".join(missing)})
+    return pd.DataFrame(rows, columns=["SKU_ID", "Missing_Fields"])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -74,6 +98,7 @@ def main() -> None:
     locations = pd.read_csv(processed / "warehouse_locations.csv")
     summary = []
     all_metadata_complete = True
+    metadata_gap_rows = []
     for name in ("baseline", "optimized"):
         layout = pd.read_csv(processed / f"{name}_allocation.csv")
         validation = validate_layout(layout, skus, locations, config)
@@ -85,6 +110,10 @@ def main() -> None:
 
         assigned = layout[["SKU_ID"]].drop_duplicates().merge(skus, on="SKU_ID", how="left")
         gaps = operational_metadata_gaps(assigned)
+        sku_gaps = operational_metadata_gap_rows(assigned)
+        if not sku_gaps.empty:
+            sku_gaps["Layout"] = name
+            metadata_gap_rows.extend(sku_gaps.to_dict("records"))
         metadata_complete = all(value == 0 for value in gaps.values())
         all_metadata_complete = all_metadata_complete and metadata_complete
         summary.append({
@@ -102,6 +131,9 @@ def main() -> None:
     except pd.errors.EmptyDataError:
         unallocated = pd.DataFrame(columns=["SKU_ID", "Reason"])
     unallocated.to_csv(reports / "unallocated_or_infeasible_skus.csv", index=False)
+    pd.DataFrame(metadata_gap_rows, columns=["SKU_ID", "Missing_Fields", "Layout"]).to_csv(
+        reports / "operational_metadata_gaps.csv", index=False
+    )
     headers = list(summary[0])
     table = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
     table.extend("| " + " | ".join(str(row[column]) for column in headers) + " |" for row in summary)
@@ -110,7 +142,7 @@ def main() -> None:
         "## Saved-layout validation", "", *table, "",
         f"Unallocated or infeasible SKUs recorded by the saved baseline: {len(unallocated)}.", "",
         "## Separate evidence files", "",
-        "Each layout has a structured full validation file plus separate known-violation, unverified-safety, unknown-reference, and aggregate-load CSVs. The unallocated_or_infeasible_skus.csv file preserves the saved baseline exclusions.", "",
+        "Each layout has a structured full validation file plus separate known-violation, unverified-safety, unknown-reference, and aggregate-load CSVs. operational_metadata_gaps.csv lists each allocated SKU and the exact fields still missing; unallocated_or_infeasible_skus.csv preserves the saved baseline exclusions.", "",
         "## Interpretation", "",
         "Known violations are checks with enough input data to demonstrate a configured rule was broken. UNVERIFIED means evidence is missing; it is not a compliance result. Aggregate loads use the configured representative-stock fallback when observed inventory is absent, so those load figures are simulation estimates.", "",
         "Operational metadata completeness checks positive inventory counts, non-placeholder hazard/handling classifications, and recorded provenance. Passing this check does not certify a facility: actual rack ratings, geometry, compatibility rules, and local safety requirements still require verification.", "",
