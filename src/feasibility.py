@@ -61,8 +61,8 @@ def _stock_units(product: pd.Series, config: Mapping[str, Any]) -> tuple[float |
         if fallback is None or fallback <= 0:
             return None, False, "Configured representative_inventory_units must be a positive numeric value."
         return fallback, True, "Observed inventory is unavailable; representative-stock assumption is used."
-    if units <= 0:
-        return None, False, "Inventory units must be positive when provided."
+    if units < 0:
+        return None, False, "Inventory units cannot be negative."
     return units, False, None
 
 
