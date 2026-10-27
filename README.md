@@ -15,7 +15,7 @@ Raw and processed data are excluded from Git.
 
 ## Setup
 
-Use Python 3.10+.
+Use Python 3.11+ (required by the pandas 3.x dependency range).
 
     python -m venv .venv
     # macOS/Linux
