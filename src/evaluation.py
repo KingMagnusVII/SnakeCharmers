@@ -85,12 +85,8 @@ def evaluate(routes, layout, profile, locations, config):
     # Calculate total physical capacity across the warehouse.
     capacity = float(locations.Volumetric_Capacity_cm3.sum())
 
-    # Estimate occupied volume from observed on-hand stock where available;
-    # otherwise use the explicitly documented simulation fallback.
-    stock_units = pd.to_numeric(profile_rows["Inventory_Units"], errors="coerce").fillna(
-        float(config.get("representative_inventory_units", 1))
-    )
-    used = float((profile_rows.Volume_cm3.fillna(0) * stock_units).sum())
+    # Estimate occupied volume from the modeled representative stock.
+    used = float(profile_rows.Volume_cm3.fillna(0).sum())
 
     # Calculate capacity of only the bins selected by the layout.
     selected_capacity = float(selected.Volumetric_Capacity_cm3.sum())

@@ -61,34 +61,9 @@ def _stock_units(product: pd.Series, config: Mapping[str, Any]) -> tuple[float |
         if fallback is None or fallback <= 0:
             return None, False, "Configured representative_inventory_units must be a positive numeric value."
         return fallback, True, "Observed inventory is unavailable; representative-stock assumption is used."
-    if units < 0:
-        return None, False, "Inventory units cannot be negative."
+    if units <= 0:
+        return None, False, "Inventory units must be positive when provided."
     return units, False, None
-
-
-def modeled_stock_load_kg(product: pd.Series, config: Mapping[str, Any]) -> float | None:
-    """Return SKU stock load using observed inventory or the simulation fallback."""
-    units, _, _ = _stock_units(product, config)
-    weight = _number(product.get("Weight_kg"))
-    if units is None or weight is None or weight < 0:
-        return None
-    return units * weight
-
-
-def rack_load_fits(
-    product: pd.Series,
-    location: pd.Series,
-    current_rack_loads: Mapping[Any, float],
-    config: Mapping[str, Any],
-) -> bool:
-    """Check whether this SKU's modeled stock fits the remaining rack capacity."""
-    load = modeled_stock_load_kg(product, config)
-    limit = _number(location.get("Rack_Max_Load_kg"))
-    rack_id = location.get("Rack_ID")
-    if load is None or limit is None:
-        # Missing capacity evidence remains UNVERIFIED and is caught by validation.
-        return True
-    return float(current_rack_loads.get(rack_id, 0.0)) + load <= limit
 
 
 def _known_incompatibility(product: pd.Series, config: Mapping[str, Any]) -> list[str]:

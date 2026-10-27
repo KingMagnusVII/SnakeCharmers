@@ -4,7 +4,7 @@ from __future__ import annotations  # Enables modern type annotations.
 import pandas as pd  # Provides DataFrame operations.
 
 from .demand_analysis import product_dimensional_fit  # Reuses the dimensional-fit calculation.
-from .feasibility import fits_product, is_product_location_feasible, modeled_stock_load_kg, rack_load_fits  # Reuses dimensional and hard-constraint checks.
+from .feasibility import fits_product, is_product_location_feasible  # Reuses dimensional and hard-constraint checks.
 
 
 def select_feasible_candidates(
@@ -122,7 +122,6 @@ def allocate_baseline(
 
     # Track occupied locations and products that could not be placed.
     used = set()
-    rack_loads: dict[str, float] = {}
     rows = []
     excluded = []
 
@@ -164,11 +163,14 @@ def allocate_baseline(
             ).any():
                 choices = choices[choices.Location_Type != "OVERSIZED"]
 
-        # Enforce both per-location constraints and remaining aggregate rack load.
+        # Apply the same feasibility rules used by the independent validator.
         match = choices[
             choices.apply(
-                lambda location: is_product_location_feasible(product, location, config)
-                and rack_load_fits(product, location, rack_loads, config),
+                lambda location: is_product_location_feasible(
+                    product,
+                    location,
+                    config,
+                ),
                 axis=1,
             )
         ].sort_values("Location_ID")
@@ -193,10 +195,6 @@ def allocate_baseline(
         # Choose the first deterministic feasible location.
         location = match.iloc[0]
         used.add(location.Location_ID)
-        rack_load = modeled_stock_load_kg(product, config)
-        if rack_load is not None:
-            rack_id = location.get("Rack_ID")
-            rack_loads[rack_id] = rack_loads.get(rack_id, 0.0) + rack_load
 
         # Save the allocation and explain why it was chosen.
         rows.append(
