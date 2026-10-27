@@ -48,39 +48,11 @@ with left:
     )
 
 with right:
-    # Separate confirmed violations from checks that remain unverified.
+    # Show the number of known validation violations in the optimized layout.
     st.subheader("Validation")
-    validation = pd.read_csv(DATA / "optimized_violations.csv")
-    confirmed = int((validation["Status"] == "VIOLATION").sum()) if "Status" in validation else 0
-    unverified = int((validation["Status"] == "UNVERIFIED").sum()) if "Status" in validation else 0
-    st.metric("Confirmed violations", confirmed)
-    st.metric("Unverified checks", unverified)
-    if unverified:
-        st.warning(
-            "Unverified checks are not proof of compliance. Product hazard, "
-            "handling, or stock data may be missing; review the saved validation "
-            "reports before treating this layout as operationally safe."
-        )
-
-
-# Make missing operational data actionable rather than showing only a raw count.
-st.subheader("Operational data readiness")
-metadata_gaps_path = ROOT / "reports" / "operational_metadata_gaps.csv"
-if metadata_gaps_path.exists():
-    metadata_gaps = pd.read_csv(metadata_gaps_path)
-    if metadata_gaps.empty:
-        st.success("Allocated SKUs have the required inventory/safety fields and provenance. This is a metadata check, not a site-safety certification.")
-    else:
-        affected_skus = int(metadata_gaps["SKU_ID"].nunique()) if "SKU_ID" in metadata_gaps else len(metadata_gaps)
-        st.warning(
-            f"{affected_skus} allocated SKU(s) still have missing operational metadata. "
-            "Fill only values verified from the warehouse/product records, rerun the pipeline, "
-            "then run the strict metadata check."
-        )
-        st.dataframe(metadata_gaps.head(100), use_container_width=True)
-else:
-    st.info(
-        "Run scripts/validate_saved_layouts.py to generate the per-SKU operational metadata gap report."
+    st.metric(
+        "Optimized violations",
+        len(pd.read_csv(DATA / "optimized_violations.csv")),
     )
 
 # Show the strongest retained SKU affinity pairs.
