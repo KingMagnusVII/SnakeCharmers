@@ -284,6 +284,7 @@ def main() -> None:
     runtime_seconds = round(time.perf_counter() - start, 2)
     (reports / "final_validation_report.md").write_text(
         "# Final validation report\n\n"
+        "Route-distance comparison uses up to 500 orders whose every SKU is allocated. This conditional route-efficiency cohort is not overall source-order coverage; the first 500 source orders are reported separately in the console.\\n\\n"
         "Confirmed constraint violations and unverified checks are counted separately. "
         "UNVERIFIED means source data is missing or unknown; it is not evidence of compliance.\n\n"
         "| Layout | Confirmed violations | Unverified checks |\n"
