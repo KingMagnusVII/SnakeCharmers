@@ -80,6 +80,26 @@ def test_missing_physical_data_is_unverified_not_compliant():
     assert {"missing_physical_dimension", "missing_weight_kg"} <= unknown
 
 
+def test_invalid_representative_inventory_fallback_is_a_violation():
+    skus = _skus()
+    skus.loc[0, "Inventory_Units"] = None
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+
+    for fallback in (0, -1, "not-a-number", None):
+        config = {**CONFIG, "representative_inventory_units": fallback}
+        result = validate_layout(layout, skus, _locations(), config)
+        invalid = result[result.Rule == "invalid_representative_inventory_units"]
+        assert len(invalid) == 1
+        assert invalid.iloc[0].Status == "VIOLATION"
+
+    valid_config = {**CONFIG, "representative_inventory_units": 2}
+    valid_result = validate_layout(layout, skus, _locations(), valid_config)
+    assumed = valid_result[valid_result.Rule == "inventory_units"]
+    assert len(assumed) == 1
+    assert assumed.iloc[0].Status == "UNVERIFIED"
+    assert not (valid_result.Status == "VIOLATION").any()
+
+
 def test_aggregate_shelf_and_rack_overload_and_ergonomics_are_reported():
     overloaded = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}, {"SKU_ID": "b", "Location_ID": "L2"}])
     assert {"aggregate_shelf_load", "aggregate_rack_load"} <= _rules(overloaded)
