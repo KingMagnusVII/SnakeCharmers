@@ -98,3 +98,15 @@ def test_unknown_skus_and_duplicate_skus_are_rejected(tmp_path):
     _write_overlay(path, [{"SKU_ID": "sku-1"}, {"SKU_ID": "sku-1"}])
     with pytest.raises(OperationalMetadataError, match="Duplicate SKU_ID"):
         apply_operational_metadata(_sku_master(), path)
+
+
+def test_zero_on_hand_is_valid_and_can_be_recorded_with_provenance(tmp_path):
+    path = tmp_path / "metadata.csv"
+    _write_overlay(path, [{
+        "SKU_ID": "sku-1",
+        "Inventory_Units": 0,
+        "Inventory_Snapshot_At": "2026-10-27",
+        "Inventory_Data_Source": "WMS stock export",
+    }])
+    master, _ = apply_operational_metadata(_sku_master(), path)
+    assert int(master.set_index("SKU_ID").loc["sku-1", "Inventory_Units"]) == 0
