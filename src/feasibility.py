@@ -57,7 +57,10 @@ def fits_product(product: pd.Series, location: pd.Series, allow_rotations: bool 
 def _stock_units(product: pd.Series, config: Mapping[str, Any]) -> tuple[float | None, bool, str | None]:
     units = _number(product.get("Inventory_Units"))
     if units is None:
-        return _number(config.get("representative_inventory_units", 1)), True, "Observed inventory is unavailable; representative-stock assumption is used."
+        fallback = _number(config.get("representative_inventory_units", 1))
+        if fallback is None or fallback <= 0:
+            return None, False, "Configured representative_inventory_units must be a positive numeric value."
+        return fallback, True, "Observed inventory is unavailable; representative-stock assumption is used."
     if units <= 0:
         return None, False, "Inventory units must be positive when provided."
     return units, False, None
@@ -95,7 +98,11 @@ def product_location_results(product: pd.Series, location: pd.Series, config: Ma
 
     units, assumed_units, unit_note = _stock_units(product, config)
     if units is None:
-        results.append(_result(sku, location_id, "invalid_inventory_units", "VIOLATION", product.get("Inventory_Units"), "> 0", unit_note or "Invalid inventory units."))
+        inventory_value = product.get("Inventory_Units")
+        missing_inventory = _number(inventory_value) is None
+        rule = "invalid_representative_inventory_units" if missing_inventory else "invalid_inventory_units"
+        measured = config.get("representative_inventory_units", 1) if missing_inventory else inventory_value
+        results.append(_result(sku, location_id, rule, "VIOLATION", measured, "> 0", unit_note or "Inventory units must be positive."))
     else:
         if assumed_units:
             results.append(_result(sku, location_id, "inventory_units", "UNVERIFIED", "missing", units, unit_note or ""))
