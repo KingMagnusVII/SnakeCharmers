@@ -3,7 +3,7 @@ from __future__ import annotations  # Enables modern type annotations.
 
 import pandas as pd  # Provides DataFrame operations.
 
-from .feasibility import is_product_location_feasible  # Reuses hard-constraint checks.
+from .feasibility import fits_product, is_product_location_feasible  # Reuses dimensional and hard-constraint checks.
 
 
 def allocate_baseline(
@@ -54,14 +54,21 @@ def allocate_baseline(
             )
         ].sort_values("Location_ID")
 
-        # Record products that have no remaining feasible location.
+        # Explain whether a product cannot fit any bin or failed remaining constraints.
         if match.empty:
-            excluded.append(
-                {
-                    "SKU_ID": product.SKU_ID,
-                    "Reason": "infeasible_or_no_remaining_location",
-                }
+            allow_rotations = bool(config.get("allow_rotations", True))
+            dimensional_matches = locations[
+                locations.apply(
+                    lambda location: fits_product(product, location, allow_rotations),
+                    axis=1,
+                )
+            ]
+            reason = (
+                "does_not_fit_any_bin_dimensions"
+                if dimensional_matches.empty
+                else "no_remaining_feasible_location"
             )
+            excluded.append({"SKU_ID": product.SKU_ID, "Reason": reason})
             continue
 
         # Choose the first deterministic feasible location.
