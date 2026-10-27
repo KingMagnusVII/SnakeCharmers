@@ -6,7 +6,7 @@ from src.evaluation import compare, evaluate
 from src.feasibility import fits_product, validate_layout
 from src import optimizer
 from src.optimizer import improve_layout_by_route_distance, optimize_layout
-from src.routing import route_orders
+from src.routing import route_orders, select_fully_allocatable_orders
 from src.warehouse_generator import generate_warehouse
 from scripts.run_pipeline import _validation_summary
 
@@ -480,3 +480,22 @@ def test_order_coverage_selector_prefers_skus_that_complete_whole_orders():
     )
 
     assert set(selected.SKU_ID) == {"a", "b"}
+
+
+
+def test_fully_allocatable_order_selector_excludes_unallocated_and_mixed_orders():
+    orders = pd.DataFrame({
+        "Order_ID": ["o1", "o1", "o2", "o3", "o4"],
+        "SKU_ID": ["a", "missing", "a", "missing", "b"],
+    })
+    layout = pd.DataFrame([
+        {"SKU_ID": "a", "Location_ID": "L1"},
+        {"SKU_ID": "b", "Location_ID": "L2"},
+    ])
+
+    selected = select_fully_allocatable_orders(orders, layout, max_orders=None)
+
+    assert selected.Order_ID.drop_duplicates().tolist() == ["o2", "o4"]
+    routes = route_orders(selected, layout, _locations())
+    assert len(routes) == 2
+    assert routes.Complete.all()
