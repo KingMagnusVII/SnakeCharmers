@@ -83,7 +83,7 @@ def apply_operational_metadata(
             )
 
     def nonblank(frame: pd.DataFrame, column: str) -> pd.Series:
-        return frame[column].fillna("").astype(str).str.strip().ne("")
+        return frame[column].astype("string").fillna("").str.strip().ne("")
 
     inventory_supplied = overlay["Inventory_Units"].notna()
     inventory_provenance_ok = nonblank(overlay, "Inventory_Snapshot_At") & nonblank(overlay, "Inventory_Data_Source")
@@ -120,7 +120,7 @@ def apply_operational_metadata(
     forbidden_unknowns = {"", "UNKNOWN", "UNSPECIFIED", "N/A", "NA"}
     for column in ("Hazard_Class", "Handling_Type"):
         supplied = nonblank(overlay, column)
-        unknown = overlay[column].fillna("").astype(str).str.strip().str.upper().isin(forbidden_unknowns)
+        unknown = overlay[column].astype("string").fillna("").str.strip().str.upper().isin(forbidden_unknowns)
         if (supplied & unknown).any():
             bad = overlay.loc[supplied & unknown, "SKU_ID"].astype(str).tolist()
             raise OperationalMetadataError(
