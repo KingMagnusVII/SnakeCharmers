@@ -99,4 +99,7 @@ def allocate_baseline(
         )
 
     # Return both successful allocations and excluded products.
-    return pd.DataFrame(rows), pd.DataFrame(excluded)
+    return (
+        pd.DataFrame(rows, columns=["SKU_ID", "Location_ID", "Demand_Class", "Placement_Rationale"]),
+        pd.DataFrame(excluded, columns=["SKU_ID", "Reason"]),
+    )
