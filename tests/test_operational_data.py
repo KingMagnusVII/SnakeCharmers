@@ -73,7 +73,7 @@ def test_invalid_inventory_quantity_is_rejected(tmp_path, quantity):
         "Inventory_Snapshot_At": "2026-10-27",
         "Inventory_Data_Source": "WMS export",
     }])
-    with pytest.raises(OperationalMetadataError, match="positive whole-number"):
+    with pytest.raises(OperationalMetadataError, match="non-negative whole-number"):
         apply_operational_metadata(_sku_master(), path)
 
 
