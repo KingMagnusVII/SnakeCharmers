@@ -51,6 +51,7 @@ def test_rotation_boundary_and_missing_dimensions():
     assert fits_product(pd.Series({"Width_cm": 40, "Height_cm": 30, "Depth_cm": 20}), location)
     assert not fits_product(pd.Series({"Width_cm": None, "Height_cm": 1, "Depth_cm": 1}), location)
 
+
 def test_missing_bin_dimension_is_unverified_but_nonpositive_is_violation():
     skus = _skus()
     layout = pd.DataFrame([{"SKU_ID": "b", "Location_ID": "L1"}])
@@ -150,7 +151,7 @@ def test_optimizer_uses_affinity_to_prefer_nearby_related_skus():
     locations = pd.DataFrame([
         {"Location_ID": "L1", "Rack_ID": "R1", "Bay": 1, "Shelf_Level": 1, "X_m": 0.0, "Y_m": 0.0, "Bin_Width_cm": 10, "Bin_Height_cm": 10, "Bin_Depth_cm": 10, "Volumetric_Capacity_cm3": 1000, "Max_Weight_Capacity_kg": 40, "Shelf_Max_Load_kg": 100, "Rack_Max_Load_kg": 100, "Distance_to_Dispatch_Depot_m": 1.0},
         {"Location_ID": "L2", "Rack_ID": "R1", "Bay": 2, "Shelf_Level": 1, "X_m": 1.0, "Y_m": 0.0, "Bin_Width_cm": 10, "Bin_Height_cm": 10, "Bin_Depth_cm": 10, "Volumetric_Capacity_cm3": 1000, "Max_Weight_Capacity_kg": 40, "Shelf_Max_Load_kg": 100, "Rack_Max_Load_kg": 100, "Distance_to_Dispatch_Depot_m": 10.0},
-        {"Location_ID": "L3", "Rack_ID": "R1", "Bay": 3, "Shelf_Level": 1, "X_m": 100.0, "Y_m": 0.0, "Bin_Width_cm": 10, "Bin_Height_cm": 10, "Bin_Depth_cm": 10, "Volumetric_Capacity_cm3": 1000, "Max_Weight_Capacity_kg": 40, "Shelf_Max_Load_kg": 100, "Rack_Max_Load_kg": 100, "Distance_to_Dispatch_Depot_m": 11.0},
+        {"Location_ID": "L3", "Rack_ID": "R1", "Bay": 3, "Shelf_Level": 1, "X_m": 100.0, "Y_m": 0.0, "Bin_Width_cm": 10, "Bin_Height_cm": 10, "Bin_Depth_cm": 100, "Volumetric_Capacity_cm3": 1000, "Max_Weight_Capacity_kg": 40, "Shelf_Max_Load_kg": 100, "Rack_Max_Load_kg": 100, "Distance_to_Dispatch_Depot_m": 2.0},
     ])
     baseline = pd.DataFrame([
         {"SKU_ID": "a", "Location_ID": "L1"},
@@ -159,15 +160,11 @@ def test_optimizer_uses_affinity_to_prefer_nearby_related_skus():
     affinity = pd.DataFrame([{"SKU_A": "a", "SKU_B": "b", "Pair_Count": 10, "Lift": 4.0}])
 
     without_affinity, _ = optimize_layout(profile, locations, baseline, pd.DataFrame(), CONFIG)
-    with_affinity, _ = optimize_layout(profile, locations, baseline, affinity, CONFIG)
-
-    assert without_affinity.loc[without_affinity.SKU_ID == "b", "Location_ID"].iloc[0] == "L2"
-    assert with_affinity.loc[with_affinity.SKU_ID == "b", "Location_ID"].iloc[0] == "L2"
-
-    # Stronger affinity weight must be able to overcome the small distance trade-off.
     affinity_config = {**CONFIG, "objective_weights": {"distance": 1.0, "affinity": 1.0, "ergonomic": 0.1}}
-    stronger, _ = optimize_layout(profile, locations, baseline, affinity, affinity_config)
-    assert stronger.loc[stronger.SKU_ID == "b", "Location_ID"].iloc[0] == "L2"
+    with_affinity, _ = optimize_layout(profile, locations, baseline, affinity, affinity_config)
+
+    assert without_affinity.loc[without_affinity.SKU_ID == "b", "Location_ID"].iloc[0] == "L3"
+    assert with_affinity.loc[with_affinity.SKU_ID == "b", "Location_ID"].iloc[0] == "L2"
 
 
 def test_evaluation_arithmetic_zero_distance_and_incomplete_orders():
