@@ -16,14 +16,68 @@ if str(ROOT) not in sys.path:
 
 # Import each stage of the warehouse-slotting pipeline.
 from src.affinity_analysis import compute_affinity
-from src.baseline import allocate_baseline
+from src.baseline import allocate_baseline, select_feasible_candidates
 from src.data_loader import load_olist_raw, normalize_olist
 from src.demand_analysis import analyze_demand
 from src.evaluation import compare, evaluate
 from src.feasibility import validate_layout
-from src.optimizer import optimize_layout
+from src.optimizer import improve_layout_by_route_distance, optimize_layout
 from src.routing import route_orders
 from src.warehouse_generator import generate_warehouse
+
+
+def optimize_and_refine_layout(profile, locations, baseline, affinity, scoped, config):
+    """Run greedy optimization followed by bounded route-distance refinement."""
+
+    greedy, opt_info = optimize_layout(
+        profile,
+        locations,
+        baseline,
+        affinity,
+        config,
+    )
+    refined, local_search_info = improve_layout_by_route_distance(
+        profile,
+        locations,
+        greedy,
+        scoped,
+        config,
+        max_swap_attempts=config["max_local_search_iterations"],
+        max_passes=1,
+        max_orders=500,
+    )
+
+    candidates = {
+        "baseline": baseline,
+        "greedy": greedy,
+        "refined": refined,
+    }
+    candidate_metrics = {}
+    feasible_candidates = {}
+    for name, candidate in candidates.items():
+        validation = validate_layout(candidate, profile, locations, config)
+        violations = int((validation["Status"] == "VIOLATION").sum()) if not validation.empty else 0
+        route_table = route_orders(scoped, candidate, locations, max_orders=500)
+        distance = float(route_table["Distance_m"].sum()) if not route_table.empty else 0.0
+        candidate_metrics[name] = {
+            "total_route_distance_m": distance,
+            "known_violations": violations,
+        }
+        if violations == 0:
+            feasible_candidates[name] = distance
+
+    selected_name = min(
+        feasible_candidates,
+        key=lambda name: (feasible_candidates[name], ("baseline", "greedy", "refined").index(name)),
+    )
+    optimized = candidates[selected_name]
+    opt_info["local_search"] = local_search_info
+    opt_info["candidate_layouts"] = candidate_metrics
+    opt_info["selected_layout"] = selected_name
+    opt_info["selection_reason"] = (
+        f"{selected_name} has the lowest total simulated route distance among feasible candidates"
+    )
+    return optimized, opt_info
 
 
 def main() -> None:
@@ -64,16 +118,8 @@ def main() -> None:
     # Restrict historical demand to the order statuses configured for the simulation.
     scoped = orders[orders.Order_Status.isin(config["demand_statuses"])]
 
-    # Select the highest-demand SKUs with usable physical metadata.
-    active = set(
-        profile[profile.Physical_Metadata_Usable]
-        .sort_values(
-            ["Recorded_Order_Lines", "SKU_ID"],
-            ascending=[False, True],
-        )
-        .head(config["max_active_skus"])
-        .SKU_ID
-    )
+    # Select demand-ranked SKUs that fit at least one location before capping.
+    active = set(select_feasible_candidates(profile, locations, config).SKU_ID)
 
     # Calculate SKU-pair co-occurrence for the active assortment.
     affinity = compute_affinity(scoped, active)
@@ -81,12 +127,14 @@ def main() -> None:
     # Create the deterministic baseline allocation and record excluded SKUs.
     baseline, excluded = allocate_baseline(profile, locations, config)
 
-    # Improve the baseline using the project's feasible greedy heuristic.
-    optimized, opt_info = optimize_layout(
+    # Improve the baseline using the project's feasible greedy heuristic,
+    # followed by bounded route-distance local search.
+    optimized, opt_info = optimize_and_refine_layout(
         profile,
         locations,
         baseline,
         affinity,
+        scoped,
         config,
     )
 

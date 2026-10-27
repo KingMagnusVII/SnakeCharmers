@@ -1,20 +1,23 @@
 # Final validation report
 
 ```text
-                            Metric    Baseline   Optimized    Change
-         allocated_bin_utilization    0.152024    0.152024  0.000000
-               allocation_coverage    0.004552    0.004552  0.000000
-average_distance_complete_orders_m   22.114286   22.095238 -0.019048
-                average_distance_m    2.842400    2.849600  0.007200
-                   complete_orders   63.000000   63.000000  0.000000
-                   completion_rate    0.126000    0.126000  0.000000
-                estimated_time_min  118.949333  118.997333  0.048000
-                 incomplete_orders  437.000000  437.000000  0.000000
-               order_line_coverage    0.136274    0.136274  0.000000
-                  orders_simulated  500.000000  500.000000  0.000000
-                  total_distance_m 1421.200000 1424.800000  3.600000
-         unknown_hazard_attributes  150.000000  150.000000  0.000000
-       whole_warehouse_utilization    0.095015    0.095015  0.000000
+                              Metric    Baseline   Optimized  Change
+           allocated_bin_utilization    0.142329    0.142329     0.0
+                 allocation_coverage    0.006070    0.006070     0.0
+  average_distance_complete_orders_m   24.350685   24.350685     0.0
+average_distance_incomplete_orders_m    0.090867    0.090867     0.0
+                  average_distance_m    3.632800    3.632800     0.0
+                     complete_orders   73.000000   73.000000     0.0
+          completed_route_distance_m 1777.600000 1777.600000     0.0
+                     completion_rate    0.146000    0.146000     0.0
+                  estimated_time_min  124.218667  124.218667     0.0
+                   incomplete_orders  427.000000  427.000000     0.0
+         incomplete_route_distance_m   38.800000   38.800000     0.0
+                 order_line_coverage    0.154832    0.154832     0.0
+                    orders_simulated  500.000000  500.000000     0.0
+                    total_distance_m 1816.400000 1816.400000     0.0
+           unknown_hazard_attributes  200.000000  200.000000     0.0
+         whole_warehouse_utilization    0.118607    0.118607     0.0
 ```
 
-Runtime seconds: 12.7
+Runtime seconds: 83.12

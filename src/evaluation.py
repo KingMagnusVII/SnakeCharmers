@@ -30,15 +30,24 @@ def evaluate(routes, layout, profile, locations, config):
 
     # Count simulated routes/orders.
     route_count = len(routes)
-
-    # Sum route distance, using zero for an empty simulation.
-    distance = float(routes["Distance_m"].sum()) if route_count else 0.0
     completion_mask = _completion_mask(routes)
+
     complete_orders = int(completion_mask.sum())
     incomplete_orders = route_count - complete_orders
+
+    # Total distance across all simulated routes.
+    distance = float(routes["Distance_m"].sum()) if route_count else 0.0
+
+    # Separate completed and incomplete route distances.
     complete_distance = (
         float(routes.loc[completion_mask, "Distance_m"].sum())
         if complete_orders
+        else 0.0
+    )
+
+    incomplete_distance = (
+        float(routes.loc[~completion_mask, "Distance_m"].sum())
+        if incomplete_orders
         else 0.0
     )
 
@@ -67,6 +76,13 @@ def evaluate(routes, layout, profile, locations, config):
         "incomplete_orders": incomplete_orders,
         "completion_rate": complete_orders / route_count if route_count else 0.0,
         "total_distance_m": distance,
+        "completed_route_distance_m": complete_distance,
+        "incomplete_route_distance_m": incomplete_distance,
+        "average_distance_incomplete_orders_m": (
+            incomplete_distance / incomplete_orders
+            if incomplete_orders
+            else 0.0
+        ),
         "average_distance_m": distance / route_count if route_count else 0.0,
         # No completed orders uses 0.0 because a completed-order average is undefined.
         "average_distance_complete_orders_m": (

@@ -1,7 +1,12 @@
 import pandas as pd
 
+from scripts import run_pipeline
 from src.affinity_analysis import compute_affinity
-from src.baseline import allocate_baseline
+from src.baseline import (
+    allocate_baseline,
+    select_feasible_candidates,
+    select_order_coverage_candidates,
+)
 from src.evaluation import compare, evaluate
 from src.feasibility import fits_product, validate_layout
 from src.optimizer import improve_layout_by_route_distance, optimize_layout
@@ -113,11 +118,143 @@ def test_baseline_and_optimizer_use_the_same_known_constraint_checks():
         assert not (result.Status == "VIOLATION").any()
 
 
+def _candidate_selection_profile():
+    rows = []
+    for sku, demand in [("high-infeasible", 100), ("feasible-a", 10), ("feasible-b", 10), ("feasible-c", 5)]:
+        rows.append(
+            {
+                "SKU_ID": sku,
+                "Width_cm": 20 if sku == "high-infeasible" else 5,
+                "Height_cm": 20 if sku == "high-infeasible" else 5,
+                "Depth_cm": 20 if sku == "high-infeasible" else 5,
+                "Weight_kg": 1,
+                "Inventory_Units": 1,
+                "Category": "safe",
+                "Hazard_Class": "NONE",
+                "Handling_Type": "NORMAL",
+                "Volume_cm3": 500 if sku == "high-infeasible" else 125,
+                "Recorded_Order_Lines": demand,
+                "Physical_Metadata_Usable": True,
+                "ABC_Class": "A",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_candidate_selection_filters_high_demand_infeasible_skus_before_cap():
+    profile = _candidate_selection_profile()
+    locations = _locations()
+    config = {**CONFIG, "max_active_skus": 2}
+
+    candidates = select_feasible_candidates(profile, locations, config)
+
+    assert candidates.SKU_ID.tolist() == ["feasible-a", "feasible-b"]
+    assert "high-infeasible" not in set(candidates.SKU_ID)
+
+
+def test_candidate_selection_preserves_demand_ranking_and_sku_tie_breaking():
+    profile = _candidate_selection_profile()
+    profile.loc[profile.SKU_ID == "feasible-a", "SKU_ID"] = "feasible-z"
+    profile.loc[profile.SKU_ID == "feasible-b", "SKU_ID"] = "feasible-a"
+    locations = _locations()
+    config = {**CONFIG, "max_active_skus": 3}
+
+    candidates = select_feasible_candidates(profile, locations, config)
+
+    assert candidates.SKU_ID.tolist() == ["feasible-a", "feasible-z", "feasible-c"]
+
+
+def test_candidate_selection_returns_all_feasible_skus_when_fewer_than_cap():
+    profile = _candidate_selection_profile().iloc[:3].copy()
+    locations = _locations()
+    config = {**CONFIG, "max_active_skus": 200}
+
+    candidates = select_feasible_candidates(profile, locations, config)
+
+    assert candidates.SKU_ID.tolist() == ["feasible-a", "feasible-b"]
+    assert len(candidates) < config["max_active_skus"]
+
+
+def test_order_coverage_selector_prefers_combination_completing_whole_orders():
+    profile = _candidate_selection_profile().loc[
+        lambda frame: frame.SKU_ID != "high-infeasible"
+    ].copy()
+    profile["Recorded_Order_Lines"] = profile.SKU_ID.map(
+        {"feasible-a": 10, "feasible-b": 9, "feasible-c": 1}
+    )
+    profile["Distinct_Orders"] = profile.SKU_ID.map(
+        {"feasible-a": 2, "feasible-b": 9, "feasible-c": 2}
+    )
+    orders = pd.DataFrame(
+        {
+            "Order_ID": ["o1", "o1", "o2", "o2"],
+            "SKU_ID": ["feasible-a", "feasible-c", "feasible-a", "feasible-c"],
+        }
+    )
+    locations = _locations()
+    config = {**CONFIG, "max_active_skus": 2}
+
+    demand = select_feasible_candidates(profile, locations, config)
+    coverage = select_order_coverage_candidates(profile, locations, orders, config)
+
+    assert demand.SKU_ID.tolist() == ["feasible-a", "feasible-b"]
+    assert coverage.SKU_ID.tolist() == ["feasible-a", "feasible-c"]
+
+
+def test_order_coverage_selector_preserves_cap_and_excludes_infeasible_skus():
+    profile = _candidate_selection_profile()
+    orders = pd.DataFrame(
+        {
+            "Order_ID": ["o1", "o1"],
+            "SKU_ID": ["high-infeasible", "feasible-a"],
+        }
+    )
+    config = {**CONFIG, "max_active_skus": 2}
+
+    candidates = select_order_coverage_candidates(
+        profile, _locations(), orders, config
+    )
+
+    assert len(candidates) == 2
+    assert "high-infeasible" not in set(candidates.SKU_ID)
+    assert candidates.SKU_ID.tolist() == ["feasible-a", "feasible-b"]
+
+
+def test_order_coverage_selector_returns_all_feasible_when_below_cap():
+    profile = _candidate_selection_profile().iloc[:3].copy()
+    orders = pd.DataFrame({"Order_ID": ["o1"], "SKU_ID": ["feasible-a"]})
+    candidates = select_order_coverage_candidates(
+        profile, _locations(), orders, {**CONFIG, "max_active_skus": 200}
+    )
+
+    assert candidates.SKU_ID.tolist() == ["feasible-a", "feasible-b"]
+
+
+def test_baseline_reports_dimensional_infeasibility_separately():
+    profile = _candidate_selection_profile()
+    locations = _locations()
+    config = {**CONFIG, "max_active_skus": 2}
+
+    layout, excluded = allocate_baseline(profile, locations, config)
+
+    assert set(layout.SKU_ID) == {"feasible-a", "feasible-b"}
+    reason = excluded.set_index("SKU_ID").loc["high-infeasible", "Reason"]
+    assert reason == "dimensional_infeasible"
+
+
 def test_evaluation_arithmetic_zero_distance_and_incomplete_orders():
     profile, locations = _skus(), _locations()
     layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
     routes = pd.DataFrame({"Distance_m": [0.0, 10.0], "Complete": [True, "false"]})
     metrics = evaluate(routes, layout, profile, locations, {"walking_speed_m_per_min": 10, "pick_handling_seconds": 0})
+    assert metrics["completed_route_distance_m"] == 0.0
+    assert metrics["incomplete_route_distance_m"] == 10.0
+    assert metrics["average_distance_incomplete_orders_m"] == 10.0
+    assert (
+        metrics["completed_route_distance_m"]
+        + metrics["incomplete_route_distance_m"]
+        == metrics["total_distance_m"]
+    )
     assert metrics["orders_simulated"] == 2
     assert metrics["complete_orders"] == 1
     assert metrics["incomplete_orders"] == 1
@@ -647,3 +784,129 @@ def test_local_search_is_deterministic_and_obeys_attempt_limit():
     assert first_info == second_info
     assert first_info["attempted_swaps"] == 0
     assert first_info["search_terminated_by_limit"]
+
+
+def test_pipeline_passes_greedy_layout_through_local_search(monkeypatch):
+    profile = pd.DataFrame([{"SKU_ID": "A"}])
+    locations = pd.DataFrame([{"Location_ID": "L1"}])
+    baseline = pd.DataFrame([{"SKU_ID": "A", "Location_ID": "L1"}])
+    affinity = pd.DataFrame()
+    scoped = pd.DataFrame([{"Order_ID": "o1", "SKU_ID": "A"}])
+    config = {"max_local_search_iterations": 17}
+    greedy_layout = pd.DataFrame([{"SKU_ID": "A", "Location_ID": "L1"}])
+    refined_layout = pd.DataFrame([{"SKU_ID": "A", "Location_ID": "L2"}])
+    calls = {}
+
+    def fake_optimize(profile_arg, locations_arg, baseline_arg, affinity_arg, config_arg):
+        calls["greedy"] = (profile_arg, locations_arg, baseline_arg, affinity_arg, config_arg)
+        return greedy_layout, {"heuristic": "greedy"}
+
+    def fake_local_search(
+        profile_arg,
+        locations_arg,
+        layout_arg,
+        orders_arg,
+        config_arg,
+        max_swap_attempts,
+        max_passes,
+        max_orders,
+    ):
+        calls["local"] = {
+            "profile": profile_arg,
+            "locations": locations_arg,
+            "layout": layout_arg,
+            "orders": orders_arg,
+            "config": config_arg,
+            "max_swap_attempts": max_swap_attempts,
+            "max_passes": max_passes,
+            "max_orders": max_orders,
+        }
+        return refined_layout, {"accepted_swaps": 1}
+
+    def fake_route_orders(orders_arg, layout_arg, locations_arg, max_orders):
+        distance = 1.0 if layout_arg.iloc[0].Location_ID == "L2" else 2.0
+        return pd.DataFrame({"Distance_m": [distance]})
+
+    monkeypatch.setattr(run_pipeline, "route_orders", fake_route_orders)
+    monkeypatch.setattr(
+        run_pipeline,
+        "validate_layout",
+        lambda layout_arg, profile_arg, locations_arg, config_arg: pd.DataFrame(),
+    )
+
+    monkeypatch.setattr(run_pipeline, "optimize_layout", fake_optimize)
+    monkeypatch.setattr(
+        run_pipeline,
+        "improve_layout_by_route_distance",
+        fake_local_search,
+    )
+
+    result, info = run_pipeline.optimize_and_refine_layout(
+        profile,
+        locations,
+        baseline,
+        affinity,
+        scoped,
+        config,
+    )
+
+    assert calls["greedy"][0] is profile
+    assert calls["greedy"][1] is locations
+    assert calls["greedy"][2] is baseline
+    assert calls["greedy"][3] is affinity
+    assert calls["greedy"][4] is config
+    assert calls["local"]["layout"] is greedy_layout
+    assert calls["local"]["orders"] is scoped
+    assert calls["local"]["max_swap_attempts"] == 17
+    assert calls["local"]["max_passes"] == 1
+    assert calls["local"]["max_orders"] == 500
+    pd.testing.assert_frame_equal(result, refined_layout)
+    assert info["heuristic"] == "greedy"
+    assert info["local_search"] == {"accepted_swaps": 1}
+    assert info["selected_layout"] == "refined"
+    assert info["candidate_layouts"]["refined"]["total_route_distance_m"] == 1.0
+
+
+def test_pipeline_does_not_select_worse_refined_layout(monkeypatch):
+    profile = pd.DataFrame([{"SKU_ID": "A"}])
+    locations = pd.DataFrame([{"Location_ID": "L1"}])
+    baseline = pd.DataFrame([{"SKU_ID": "A", "Location_ID": "L1"}])
+    greedy_layout = pd.DataFrame([{"SKU_ID": "A", "Location_ID": "L2"}])
+    refined_layout = pd.DataFrame([{"SKU_ID": "A", "Location_ID": "L3"}])
+    config = {"max_local_search_iterations": 1}
+
+    monkeypatch.setattr(
+        run_pipeline,
+        "optimize_layout",
+        lambda *args: (greedy_layout, {"heuristic": "greedy"}),
+    )
+    monkeypatch.setattr(
+        run_pipeline,
+        "improve_layout_by_route_distance",
+        lambda *args, **kwargs: (refined_layout, {"accepted_swaps": 0}),
+    )
+    monkeypatch.setattr(
+        run_pipeline,
+        "validate_layout",
+        lambda *args: pd.DataFrame(),
+    )
+    monkeypatch.setattr(
+        run_pipeline,
+        "route_orders",
+        lambda orders_arg, layout_arg, locations_arg, max_orders: pd.DataFrame(
+            {"Distance_m": [float({"L1": 1, "L2": 2, "L3": 3}[layout_arg.iloc[0].Location_ID])]}
+        ),
+    )
+
+    result, info = run_pipeline.optimize_and_refine_layout(
+        profile,
+        locations,
+        baseline,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        config,
+    )
+
+    pd.testing.assert_frame_equal(result, baseline)
+    assert info["selected_layout"] == "baseline"
+    assert info["selection_reason"].startswith("baseline has the lowest")

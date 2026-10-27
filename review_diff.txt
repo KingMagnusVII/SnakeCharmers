@@ -1,0 +1,73 @@
+diff --git a/src/evaluation.py b/src/evaluation.py
+index a58c33d..deadbff 100644
+--- a/src/evaluation.py
++++ b/src/evaluation.py
+@@ -30,18 +30,27 @@ def evaluate(routes, layout, profile, locations, config):
+ 
+     # Count simulated routes/orders.
+     route_count = len(routes)
+-
+-    # Sum route distance, using zero for an empty simulation.
+-    distance = float(routes["Distance_m"].sum()) if route_count else 0.0
+     completion_mask = _completion_mask(routes)
++
+     complete_orders = int(completion_mask.sum())
+     incomplete_orders = route_count - complete_orders
++
++    # Total distance across all simulated routes.
++    distance = float(routes["Distance_m"].sum()) if route_count else 0.0
++
++    # Separate completed and incomplete route distances.
+     complete_distance = (
+         float(routes.loc[completion_mask, "Distance_m"].sum())
+         if complete_orders
+         else 0.0
+     )
+ 
++    incomplete_distance = (
++        float(routes.loc[~completion_mask, "Distance_m"].sum())
++        if incomplete_orders
++        else 0.0
++    )
++
+     # Keep only warehouse locations used by the supplied layout.
+     selected = locations[locations.Location_ID.isin(layout.Location_ID)]
+ 
+@@ -67,6 +76,13 @@ def evaluate(routes, layout, profile, locations, config):
+         "incomplete_orders": incomplete_orders,
+         "completion_rate": complete_orders / route_count if route_count else 0.0,
+         "total_distance_m": distance,
++        "completed_route_distance_m": complete_distance,
++        "incomplete_route_distance_m": incomplete_distance,
++        "average_distance_incomplete_orders_m": (
++            incomplete_distance / incomplete_orders
++            if incomplete_orders
++            else 0.0
++        ),
+         "average_distance_m": distance / route_count if route_count else 0.0,
+         # No completed orders uses 0.0 because a completed-order average is undefined.
+         "average_distance_complete_orders_m": (
+diff --git a/tests/test_engine.py b/tests/test_engine.py
+index aceda9d..58158bd 100644
+--- a/tests/test_engine.py
++++ b/tests/test_engine.py
+@@ -118,6 +118,19 @@ def test_evaluation_arithmetic_zero_distance_and_incomplete_orders():
+     layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+     routes = pd.DataFrame({"Distance_m": [0.0, 10.0], "Complete": [True, "false"]})
+     metrics = evaluate(routes, layout, profile, locations, {"walking_speed_m_per_min": 10, "pick_handling_seconds": 0})
++    assert metrics["completed_route_distance_m"] == 0.0
++    assert metrics["incomplete_route_distance_m"] == 10.0
++    assert metrics["average_distance_incomplete_orders_m"] == 10.0
++    assert (
++        metrics["completed_route_distance_m"]
++        + metrics["incomplete_route_distance_m"]
++        == metrics["total_distance_m"]
++    )
++    assert (
++        metrics["completed_route_distance_m"]
++        + metrics["incomplete_route_distance_m"]
++        == metrics["total_distance_m"]
++    )
+     assert metrics["orders_simulated"] == 2
+     assert metrics["complete_orders"] == 1
+     assert metrics["incomplete_orders"] == 1
