@@ -200,10 +200,12 @@ def main() -> None:
             {
                 "eligible_orders_available": int(eligible_orders_all["Order_ID"].nunique()),
                 "eligible_orders_evaluated": int(route_sample_orders["Order_ID"].nunique()),
-                "eligible_completion_rate": baseline_metrics["completion_rate"] if "baseline_metrics" in locals() else (
+                "eligible_completion_rate": (
                     float(baseline_routes["Complete"].map(
                         lambda value: value is True or str(value).strip().lower() == "true"
-                    ).mean()) if not baseline_routes.empty else 0.0
+                    ).mean())
+                    if not baseline_routes.empty
+                    else 0.0
                 ),
                 "source_sample_definition": "first 500 source orders, including orders with no allocated SKUs",
                 "source_first_500_baseline": source_sample_metrics["baseline"],
