@@ -6,6 +6,7 @@ from src.evaluation import compare, evaluate
 from src.feasibility import fits_product, validate_layout
 from src.optimizer import optimize_layout
 from src.warehouse_generator import generate_warehouse
+from scripts.run_pipeline import _validation_summary
 
 
 CONFIG = {
@@ -238,3 +239,12 @@ def test_oversized_storage_fits_and_allocates_four_outlier_skus():
     assert set(baseline.Location_ID).issubset(set(oversized.Location_ID))
     validation = validate_layout(baseline, profile, locations, CONFIG)
     assert not (validation.Status == "VIOLATION").any()
+
+
+def test_validation_summary_separates_violations_from_unverified_checks():
+    results = pd.DataFrame({"Status": ["VIOLATION", "UNVERIFIED", "UNVERIFIED"]})
+    assert _validation_summary(results) == {"known_violations": 1, "unverified_checks": 2}
+    assert _validation_summary(pd.DataFrame(columns=["Status"])) == {
+        "known_violations": 0,
+        "unverified_checks": 0,
+    }
