@@ -248,3 +248,14 @@ def test_validation_summary_separates_violations_from_unverified_checks():
         "known_violations": 0,
         "unverified_checks": 0,
     }
+
+
+def test_evaluation_exposes_missing_safety_and_inventory_attributes():
+    profile = _skus()
+    profile.loc[profile.SKU_ID == "a", ["Hazard_Class", "Handling_Type", "Inventory_Units"]] = ["UNSPECIFIED", "UNKNOWN", None]
+    locations = _locations()
+    layout = pd.DataFrame([{"SKU_ID": "a", "Location_ID": "L1"}])
+    metrics = evaluate(pd.DataFrame(columns=["Distance_m", "Complete"]), layout, profile, locations, CONFIG)
+    assert metrics["unknown_hazard_attributes"] == 1
+    assert metrics["unknown_handling_attributes"] == 1
+    assert metrics["unknown_inventory_attributes"] == 1
