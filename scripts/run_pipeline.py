@@ -183,7 +183,12 @@ def _run_inventory_holdout_experiment(orders, skus, locations, config, out, repo
     inventory_estimates, training_days = estimate_starting_inventory(train_orders, coverage_days=coverage_days)
     stock_by_sku = inventory_estimates.set_index("SKU_ID")["Starting_Inventory_Units"].to_dict()
     train_profile["Inventory_Units"] = train_profile["SKU_ID"].map(stock_by_sku).fillna(0).astype(int)
-    candidates = select_feasible_candidates(train_profile, locations, config)
+    # Prioritize SKUs that jointly cover complete historical orders in the
+    # training period. This changes assortment selection, not the hard physical
+    # feasibility rules, and uses no later/test orders.
+    candidates = select_order_coverage_candidates(
+        train_profile, locations, train_orders, config
+    )
     baseline, excluded = allocate_baseline(train_profile, locations, config, candidates=candidates)
     training_skus = set(baseline["SKU_ID"])
     inventory_estimates = inventory_estimates.loc[inventory_estimates["SKU_ID"].isin(training_skus)].copy()
@@ -198,6 +203,24 @@ def _run_inventory_holdout_experiment(orders, skus, locations, config, out, repo
         test_orders = test_orders.loc[test_orders["Order_ID"].isin(keep_ids)].copy()
     baseline_routes, baseline_ledger, baseline_metrics = simulate_inventory_picking(test_orders, baseline, locations, inventory_estimates)
     optimized_routes, optimized_ledger, optimized_metrics = simulate_inventory_picking(test_orders, optimized, locations, inventory_estimates)
+
+    # Separate assortment coverage from simulated stock availability. An order
+    # is allocation-completable when every requested SKU has a slot, regardless
+    # of the deliberately estimated starting-stock proxy.
+    def allocation_coverage(layout):
+        allocated_skus = set(layout["SKU_ID"])
+        order_skus = test_orders.loc[
+            test_orders["Order_ID"].notna() & test_orders["SKU_ID"].notna()
+        ].groupby("Order_ID")["SKU_ID"].agg(lambda values: set(values))
+        complete = order_skus.map(lambda requested: requested <= allocated_skus)
+        return {
+            "allocation_completable_orders": int(complete.sum()),
+            "allocation_completion_rate": float(complete.mean()) if len(complete) else 0.0,
+            "orders_with_unallocated_skus": int((~complete).sum()),
+        }
+
+    baseline_metrics.update(allocation_coverage(baseline))
+    optimized_metrics.update(allocation_coverage(optimized))
     baseline_routes.to_csv(out / "inventory_holdout_baseline_routes.csv", index=False)
     optimized_routes.to_csv(out / "inventory_holdout_optimized_routes.csv", index=False)
     baseline_ledger.to_csv(out / "inventory_holdout_baseline_stock_ledger.csv", index=False)
@@ -234,7 +257,8 @@ def _run_inventory_holdout_experiment(orders, skus, locations, config, out, repo
         f"- Starting-stock rule: {coverage_days} days, estimated only from training order-item lines over {training_days} calendar days.", "",
         "## Important interpretation", "",
         "These quantities are **simulated starting inventory**, not actual Kaggle inventory. Olist provides historical order-item lines, not on-hand stock. Each line is treated as one demand unit because the source has no explicit quantity field. Starting stock is ceil(daily recorded-line demand × coverage days). Stock is decremented only when an entire order can be fulfilled; failed orders do not consume inventory. Unallocated SKUs are reported separately from stockouts.", "",
-        "The baseline and optimized layouts use the same training-derived SKU assortment, same starting inventory, and same later test orders. Route optimization/refinement uses training orders only; later test orders are held out for evaluation.", "",
+        "The assortment is selected using order-coverage-first ranking on training orders only, then allocated under the unchanged hard feasibility constraints. The baseline and optimized layouts use the same selected SKU assortment, same starting inventory, and same later test orders. Route optimization/refinement uses training orders only; later test orders are held out for evaluation.", "",
+        "Allocation completion means every requested SKU has an allocated slot, ignoring inventory availability. Stock-constrained completion additionally requires the estimated starting inventory to cover the full order. These metrics answer different questions and must not be conflated.", "",
         "## Test metrics", "",
         "| Metric | Baseline | Optimized | Change (optimized − baseline) |", "|---|---:|---:|---:|",
     ]
