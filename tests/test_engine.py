@@ -326,7 +326,9 @@ def test_route_records_order_with_every_sku_unallocated():
     orders = pd.DataFrame({"Order_ID": ["o1"], "SKU_ID": ["missing"]})
     layout = pd.DataFrame(columns=["SKU_ID", "Location_ID"])
 
-    routes = route_orders(orders, layout, _route_locations())
+    routes = route_orders(
+        orders, layout, _route_locations(), include_zero_pick_orders=True
+    )
 
     assert routes.to_dict("records") == [
         {
@@ -349,7 +351,13 @@ def test_route_sample_limit_counts_unassigned_source_orders():
         [{"SKU_ID": "a", "Location_ID": "L1"}, {"SKU_ID": "b", "Location_ID": "L2"}]
     )
 
-    routes = route_orders(orders, layout, _route_locations(), max_orders=2)
+    routes = route_orders(
+        orders,
+        layout,
+        _route_locations(),
+        max_orders=2,
+        include_zero_pick_orders=True,
+    )
 
     assert routes.Order_ID.tolist() == ["o1", "o2"]
     assert routes.Complete.tolist() == [False, True]
