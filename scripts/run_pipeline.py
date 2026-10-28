@@ -20,6 +20,11 @@ from src.demand_analysis import analyze_demand, product_dimensional_fit
 from src.evaluation import compare, evaluate
 from src.feasibility import validate_layout
 from src.ml_demand import forecast_next_week_demand
+from src.inventory_simulation import (
+    chronological_train_test_split,
+    estimate_starting_inventory,
+    simulate_inventory_picking,
+)
 from src.optimizer import improve_layout_by_route_distance, optimize_layout
 from src.routing import route_orders
 from src.warehouse_generator import generate_warehouse
@@ -163,6 +168,81 @@ def _source_sku_diagnosis(source_orders, profile, locations, candidates, layout,
     )
     return detail, summary
 
+
+def _run_inventory_holdout_experiment(orders, skus, locations, config, out, reports):
+    """Estimate 14-day simulated stock from earlier orders; replay later orders only."""
+    settings = config.get("inventory_simulation", {})
+    coverage_days = int(settings.get("coverage_days", 14))
+    train_fraction = float(settings.get("train_fraction", 0.8))
+    max_test_orders = int(settings.get("max_test_orders", 0))
+    scoped = orders.loc[orders["Order_Status"].isin(config["demand_statuses"])].copy()
+    train_orders, later_orders, cutoff = chronological_train_test_split(scoped, train_fraction=train_fraction)
+    train_profile, training_quality = analyze_demand(train_orders, skus, config)
+    train_profile = train_profile.loc[train_profile["Recorded_Order_Lines"] > 0].copy()
+    train_profile, ml_info = forecast_next_week_demand(train_orders, train_profile, config)
+    inventory_estimates, training_days = estimate_starting_inventory(train_orders, coverage_days=coverage_days)
+    stock_by_sku = inventory_estimates.set_index("SKU_ID")["Starting_Inventory_Units"].to_dict()
+    train_profile["Inventory_Units"] = train_profile["SKU_ID"].map(stock_by_sku).fillna(0).astype(int)
+    candidates = select_feasible_candidates(train_profile, locations, config)
+    baseline, excluded = allocate_baseline(train_profile, locations, config, candidates=candidates)
+    training_skus = set(baseline["SKU_ID"])
+    inventory_estimates = inventory_estimates.loc[inventory_estimates["SKU_ID"].isin(training_skus)].copy()
+    training_affinity = compute_affinity(train_orders, training_skus)
+    optimized, opt_info = optimize_and_refine_layout(train_profile, locations, baseline, training_affinity, train_orders, config)
+    if set(baseline["SKU_ID"]) != set(optimized["SKU_ID"]):
+        raise RuntimeError("Fair holdout comparison requires baseline and optimized layouts to contain the same SKU assortment.")
+    test_orders = later_orders
+    if max_test_orders > 0:
+        order_index = test_orders[["Order_ID", "Timestamp"]].drop_duplicates("Order_ID").sort_values(["Timestamp", "Order_ID"], kind="mergesort")
+        keep_ids = set(order_index.head(max_test_orders)["Order_ID"])
+        test_orders = test_orders.loc[test_orders["Order_ID"].isin(keep_ids)].copy()
+    baseline_routes, baseline_ledger, baseline_metrics = simulate_inventory_picking(test_orders, baseline, locations, inventory_estimates)
+    optimized_routes, optimized_ledger, optimized_metrics = simulate_inventory_picking(test_orders, optimized, locations, inventory_estimates)
+    baseline_routes.to_csv(out / "inventory_holdout_baseline_routes.csv", index=False)
+    optimized_routes.to_csv(out / "inventory_holdout_optimized_routes.csv", index=False)
+    baseline_ledger.to_csv(out / "inventory_holdout_baseline_stock_ledger.csv", index=False)
+    optimized_ledger.to_csv(out / "inventory_holdout_optimized_stock_ledger.csv", index=False)
+    inventory_estimates.to_csv(out / "inventory_holdout_starting_inventory.csv", index=False)
+    baseline.to_csv(out / "inventory_holdout_baseline_layout.csv", index=False)
+    optimized.to_csv(out / "inventory_holdout_optimized_layout.csv", index=False)
+    excluded.to_csv(out / "inventory_holdout_unallocated_skus.csv", index=False)
+    comparison_rows = []
+    for metric in sorted(set(baseline_metrics) | set(optimized_metrics)):
+        base_value, opt_value = baseline_metrics.get(metric), optimized_metrics.get(metric)
+        comparison_rows.append({"Metric": metric, "Baseline": base_value, "Optimized": opt_value, "Change_Optimized_Minus_Baseline": opt_value - base_value if isinstance(base_value, (int, float)) and isinstance(opt_value, (int, float)) else None})
+    comparison = pd.DataFrame(comparison_rows)
+    comparison.to_csv(out / "inventory_holdout_comparison.csv", index=False)
+    split_info = {
+        "training_order_count": int(train_orders["Order_ID"].nunique()),
+        "test_order_count_before_limit": int(later_orders["Order_ID"].nunique()),
+        "test_order_count_evaluated": int(test_orders["Order_ID"].nunique()),
+        "training_start": str(train_orders["Timestamp"].min()), "training_end": str(train_orders["Timestamp"].max()),
+        "test_start": str(later_orders["Timestamp"].min()), "test_end": str(later_orders["Timestamp"].max()),
+        "cutoff_timestamp_exclusive_for_training": str(cutoff), "training_days": int(training_days),
+        "coverage_days": int(coverage_days), "max_test_orders_config": int(max_test_orders),
+        "starting_inventory_is_simulated": True,
+        "inventory_source": "ceil(training-period recorded order-item lines per day × coverage days)",
+        "training_demand_quality": training_quality, "training_forecast": ml_info,
+        "training_optimization": opt_info, "baseline": baseline_metrics, "optimized": optimized_metrics,
+    }
+    (reports / "inventory_holdout_experiment.json").write_text(json.dumps(split_info, indent=2, default=str) + "\n", encoding="utf-8")
+    lines = [
+        "# Chronological inventory and picking holdout experiment", "", "## Data boundary", "",
+        f"- Training orders: {split_info['training_order_count']:,}, from {split_info['training_start']} through {split_info['training_end']}.",
+        f"- Test orders evaluated: {split_info['test_order_count_evaluated']:,}, from {split_info['test_start']} through {split_info['test_end']}.",
+        f"- Timestamp cutoff: {cutoff}; training timestamps are strictly earlier.",
+        f"- Starting-stock rule: {coverage_days} days, estimated only from training order-item lines over {training_days} calendar days.", "",
+        "## Important interpretation", "",
+        "These quantities are **simulated starting inventory**, not actual Kaggle inventory. Olist provides historical order-item lines, not on-hand stock. Each line is treated as one demand unit because the source has no explicit quantity field. Starting stock is ceil(daily recorded-line demand × coverage days). Stock is decremented only when an entire order can be fulfilled; failed orders do not consume inventory. Unallocated SKUs are reported separately from stockouts.", "",
+        "The baseline and optimized layouts use the same training-derived SKU assortment, same starting inventory, and same later test orders. Route optimization/refinement uses training orders only; later test orders are held out for evaluation.", "",
+        "## Test metrics", "",
+        "| Metric | Baseline | Optimized | Change (optimized − baseline) |", "|---|---:|---:|---:|",
+    ]
+    for row in comparison.to_dict("records"):
+        lines.append(f"| {row['Metric']} | {row['Baseline']} | {row['Optimized']} | {row['Change_Optimized_Minus_Baseline']} |")
+    lines.extend(["", "## Reproducible metric payload", "", "```text", comparison.to_string(index=False), "```", ""])
+    (reports / "inventory_holdout_experiment.md").write_text("\n".join(lines), encoding="utf-8")
+    print(json.dumps({"inventory_holdout_experiment": {"training_orders": split_info["training_order_count"], "test_orders": split_info["test_order_count_evaluated"], "coverage_days": coverage_days, "baseline": baseline_metrics, "optimized": optimized_metrics, "report": "reports/inventory_holdout_experiment.md"}}, indent=2, default=str))
 
 def main() -> None:
     """Run every stage of the warehouse-slotting pipeline."""
