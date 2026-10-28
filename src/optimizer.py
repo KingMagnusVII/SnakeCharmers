@@ -1,24 +1,21 @@
 """Affinity-aware feasible improvement over the deterministic baseline."""
-from __future__ import annotations  # Enables modern type annotations.
+from __future__ import annotations
 
-import math  # Provides stable logarithmic affinity weighting.
+import math
 
-import pandas as pd  # Provides DataFrame operations.
+import pandas as pd
 
-from .feasibility import fits_product, is_product_location_feasible, validate_layout
+from .feasibility import fits_product, is_product_location_feasible, modeled_stock_load_kg, rack_load_fits, validate_layout
 from .routing import route_orders
 
 
 def _affinity_index(affinity: pd.DataFrame) -> dict[str, list[tuple[str, float]]]:
     """Build a symmetric SKU -> (related SKU, strength) lookup from affinity data."""
-
     if affinity.empty:
         return {}
-
     required = {"SKU_A", "SKU_B", "Pair_Count", "Lift"}
     if not required.issubset(affinity.columns):
         return {}
-
     index: dict[str, list[tuple[str, float]]] = {}
     for row in affinity.itertuples(index=False):
         try:
@@ -26,15 +23,11 @@ def _affinity_index(affinity: pd.DataFrame) -> dict[str, list[tuple[str, float]]
             lift = float(row.Lift)
         except (TypeError, ValueError):
             continue
-
         if pair_count <= 0 or not math.isfinite(lift) or lift <= 0:
             continue
-
-        # Log scaling prevents a single very large lift from dominating the score.
         strength = math.log1p(pair_count) * math.log1p(lift)
         index.setdefault(row.SKU_A, []).append((row.SKU_B, strength))
         index.setdefault(row.SKU_B, []).append((row.SKU_A, strength))
-
     return index
 
 
@@ -45,29 +38,22 @@ def _affinity_score(
     affinity_index: dict[str, list[tuple[str, float]]],
     max_distance: float,
 ) -> float:
-    """Return normalized affinity to already-placed related SKUs.
-
-    A related SKU scores highest when it is already close to the candidate bin.
-    """
-
+    """Return normalized affinity to already-placed related SKUs."""
     related = affinity_index.get(sku, [])
     if not related or max_distance <= 0:
         return 0.0
-
     weighted_proximity = 0.0
     total_strength = 0.0
     for other_sku, strength in related:
         other = placed_locations.get(other_sku)
         if other is None:
             continue
-
         distance = abs(float(candidate["X_m"]) - float(other["X_m"])) + abs(
             float(candidate["Y_m"]) - float(other["Y_m"])
         )
         proximity = max(0.0, 1.0 - distance / max_distance)
         weighted_proximity += strength * proximity
         total_strength += strength
-
     if total_strength == 0:
         return 0.0
     return weighted_proximity / total_strength
@@ -75,7 +61,6 @@ def _affinity_score(
 
 def optimize_layout(profile, locations, baseline, affinity, config):
     """Greedily reassign each SKU to a feasible location using ML, distance and affinity."""
-
     if baseline.empty:
         return baseline.copy(), {"iterations": 0}
 
@@ -84,6 +69,7 @@ def optimize_layout(profile, locations, baseline, affinity, config):
     placed_locations: dict[str, pd.Series] = {}
     rows = []
     used = set()
+    rack_loads: dict[str, float] = {}
 
     distance_weight = float(config.get("objective_weights", {}).get("distance", 1.0))
     affinity_weight = float(config.get("objective_weights", {}).get("affinity", 0.25))
@@ -92,10 +78,6 @@ def optimize_layout(profile, locations, baseline, affinity, config):
     max_distance = float(locations["Distance_to_Dispatch_Depot_m"].max()) if not locations.empty else 0.0
     max_distance = max(max_distance, 1.0)
 
-    # ML forecast now affects the optimized layout itself: high predicted-demand
-    # SKUs are placed first, giving them first access to the best feasible bins.
-    # The baseline order remains historical-demand based, so the two strategies
-    # can still be compared fairly.
     if "Predicted_Next_Week_Demand" in profile.columns:
         ml_priority = profile_by_sku["Predicted_Next_Week_Demand"].reindex(baseline.SKU_ID)
         ml_priority = pd.to_numeric(ml_priority, errors="coerce").fillna(0.0)
@@ -105,15 +87,12 @@ def optimize_layout(profile, locations, baseline, affinity, config):
         ).drop(columns="_ml_priority")
         ml_used = True
     else:
-        # Keep the optimizer usable for older profiles that do not contain ML data.
         ml_used = False
 
     for row in baseline.itertuples(index=False):
         product = profile_by_sku.loc[row.SKU_ID]
         candidates = locations[~locations.Location_ID.isin(used)]
 
-        # Keep dedicated oversized slots available for SKUs that cannot fit a
-        # standard bin. Fall back naturally only when a SKU has no standard-bin fit.
         if "Location_Type" in locations.columns:
             standard_locations = locations[locations.Location_Type != "OVERSIZED"]
             if not standard_locations.empty and standard_locations.apply(
@@ -126,7 +105,8 @@ def optimize_layout(profile, locations, baseline, affinity, config):
 
         candidates = candidates[
             candidates.apply(
-                lambda location: is_product_location_feasible(product, location, config),
+                lambda location: is_product_location_feasible(product, location, config)
+                and rack_load_fits(product, location, rack_loads, config),
                 axis=1,
             )
         ].copy()
@@ -144,8 +124,6 @@ def optimize_layout(profile, locations, baseline, affinity, config):
                 affinity_index,
                 max_distance,
             )
-            # Scale the normalized affinity bonus to the warehouse distance range so
-            # the configured objective weights are comparable in magnitude.
             affinity_bonus = affinity * max_distance
             return (
                 distance_weight * distance
@@ -156,6 +134,10 @@ def optimize_layout(profile, locations, baseline, affinity, config):
         candidates["score"] = candidates.apply(score, axis=1)
         location = candidates.sort_values(["score", "Location_ID"]).iloc[0]
         used.add(location.Location_ID)
+        rack_load = modeled_stock_load_kg(product, config)
+        if rack_load is not None:
+            rack_id = location.get("Rack_ID")
+            rack_loads[rack_id] = rack_loads.get(rack_id, 0.0) + rack_load
         placed_locations[row.SKU_ID] = location
 
         affinity_used = _affinity_score(
@@ -190,17 +172,16 @@ def optimize_layout(profile, locations, baseline, affinity, config):
 
 
 def improve_layout_by_route_distance(
-    profile,
-    locations,
-    layout,
-    orders,
-    config,
-    max_swap_attempts=100,
-    max_passes=1,
-    max_orders=500,
-):
+    profile: pd.DataFrame,
+    locations: pd.DataFrame,
+    layout: pd.DataFrame,
+    orders: pd.DataFrame,
+    config: dict,
+    max_swap_attempts: int = 100,
+    max_passes: int = 1,
+    max_orders: int = 500,
+) -> tuple[pd.DataFrame, dict]:
     """Improve a layout with deterministic feasible location swaps."""
-
     current = layout.copy().reset_index(drop=True)
     if current.empty:
         return current, {
