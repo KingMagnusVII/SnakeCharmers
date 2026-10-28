@@ -1,29 +1,12 @@
 {
-  "name": "Python 3",
+  "name": "SnakeCharmers Python + Frontend",
   "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
   "customizations": {
-    "codespaces": {
-      "openFiles": [
-        "README.md",
-        "dashboard.py"
-      ]
-    },
     "vscode": {
       "settings": {},
-      "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance"
-      ]
+      "extensions": ["ms-python.python", "ms-python.vscode-pylance"]
     }
   },
-  "updateContentCommand": "python -m pip install -r requirements.txt",
-  "portsAttributes": {
-    "8501": {
-      "label": "Application",
-      "onAutoForward": "openPreview"
-    }
-  },
-  "forwardPorts": [
-    8501
-  ]
+  "updateContentCommand": "[ -f requirements.txt ] && pip3 install --user -r requirements.txt; [ -f package.json ] && npm install",
+  "forwardPorts": [8501,5173]
 }
