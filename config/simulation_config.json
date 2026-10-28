@@ -1,10 +1,12 @@
 {
-  "demand_statuses": ["delivered"],
-  "max_active_skus": 200,
+  "demand_statuses": [
+    "delivered"
+  ],
+  "max_active_skus": 500,
   "representative_inventory_units": 1,
   "allow_rotations": true,
   "ergonomics": {
-    "heavy_sku_weight_kg": 10.0,
+    "heavy_sku_weight_kg": 10,
     "max_shelf_level_for_heavy_skus": 2,
     "description": "Prototype ergonomic placement assumption; replace with a documented site policy."
   },
@@ -13,12 +15,25 @@
     "category_hazard_pairs": [],
     "hazard_handling_pairs": []
   },
-  "abc_thresholds": {"A": 0.8, "B": 0.95},
+  "abc_thresholds": {
+    "A": 0.8,
+    "B": 0.95
+  },
   "affinity_min_pair_count": 2,
-  "affinity_min_support": 0.0,
-  "walking_speed_m_per_min": 75.0,
-  "pick_handling_seconds": 12.0,
-  "objective_weights": {"distance": 1.0, "affinity": 0.25, "ergonomic": 0.1, "waste": 0.00001},
+  "affinity_min_support": 0,
+  "walking_speed_m_per_min": 75,
+  "pick_handling_seconds": 12,
+  "objective_weights": {
+    "distance": 1,
+    "affinity": 0.25,
+    "ergonomic": 0.1,
+    "waste": 0.00001
+  },
   "random_seed": 42,
-  "max_local_search_iterations": 100
+  "max_local_search_iterations": 100,
+  "inventory_simulation": {
+    "coverage_days": 14,
+    "train_fraction": 0.8,
+    "max_test_orders": 0
+  }
 }
