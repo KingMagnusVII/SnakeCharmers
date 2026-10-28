@@ -273,6 +273,8 @@ def main() -> None:
 
     scoped = orders[orders.Order_Status.isin(config["demand_statuses"])]
 
+    _run_inventory_holdout_experiment(orders, skus, locations, config, out, reports)
+
     baseline, excluded = allocate_baseline(profile, locations, config)
 
     excluded.to_csv(out / "unallocated_skus.csv", index=False)
