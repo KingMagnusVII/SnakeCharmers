@@ -10,26 +10,20 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-
 RESULT_COLUMNS = ["SKU_ID", "Location_ID", "Rule", "Status", "Measured", "Limit", "Details"]
-
 
 def _number(value: Any) -> float | None:
     value = pd.to_numeric(value, errors="coerce")
     return None if pd.isna(value) else float(value)
 
-
 def _result(sku: Any, location: Any, rule: str, status: str, measured: Any, limit: Any, details: str) -> dict[str, Any]:
     return {"SKU_ID": "" if pd.isna(sku) else sku, "Location_ID": "" if pd.isna(location) else location, "Rule": rule, "Status": status, "Measured": measured, "Limit": limit, "Details": details}
 
-
 def _config(config: Mapping[str, Any] | bool | None, allow_rotations: bool | None) -> dict[str, Any]:
-    """Support the former boolean fourth argument while accepting full config."""
     result = {"allow_rotations": config} if isinstance(config, bool) else dict(config or {})
     if allow_rotations is not None:
         result["allow_rotations"] = allow_rotations
     return result
-
 
 def _dimensions(product: pd.Series) -> tuple[list[float] | None, list[dict[str, Any]]]:
     values: list[float] = []
@@ -43,16 +37,13 @@ def _dimensions(product: pd.Series) -> tuple[list[float] | None, list[dict[str, 
         values.append(value if value is not None else float("nan"))
     return (None if results else values), results
 
-
 def fits_product(product: pd.Series, location: pd.Series, allow_rotations: bool = True) -> bool:
-    """Return whether positive dimensions fit the bin in an allowed orientation."""
     dims, problems = _dimensions(product)
     bin_dims = [_number(location.get(column)) for column in ("Bin_Width_cm", "Bin_Height_cm", "Bin_Depth_cm")]
     if problems or dims is None or any(value is None or value <= 0 for value in bin_dims):
         return False
     orientations = permutations(dims) if allow_rotations else (dims,)
     return any(all(product_dim <= bin_dim for product_dim, bin_dim in zip(orientation, bin_dims)) for orientation in orientations)
-
 
 def _stock_units(product: pd.Series, config: Mapping[str, Any]) -> tuple[float | None, bool, str | None]:
     units = _number(product.get("Inventory_Units"))
@@ -65,6 +56,20 @@ def _stock_units(product: pd.Series, config: Mapping[str, Any]) -> tuple[float |
         return None, False, "Inventory units must be positive when provided."
     return units, False, None
 
+def modeled_stock_load_kg(product: pd.Series, config: Mapping[str, Any]) -> float | None:
+    units, _, _ = _stock_units(product, config)
+    weight = _number(product.get("Weight_kg"))
+    if units is None or weight is None or weight < 0:
+        return None
+    return units * weight
+
+def rack_load_fits(product: pd.Series, location: pd.Series, current_rack_loads: Mapping[Any, float], config: Mapping[str, Any]) -> bool:
+    load = modeled_stock_load_kg(product, config)
+    limit = _number(location.get("Rack_Max_Load_kg"))
+    rack_id = location.get("Rack_ID")
+    if load is None or limit is None:
+        return True
+    return float(current_rack_loads.get(rack_id, 0.0)) + load <= limit
 
 def _known_incompatibility(product: pd.Series, config: Mapping[str, Any]) -> list[str]:
     rules = config.get("incompatibility_rules", {}) or {}
@@ -78,9 +83,7 @@ def _known_incompatibility(product: pd.Series, config: Mapping[str, Any]) -> lis
             matches.append(f"hazard_class={hazard}, handling_type={handling}")
     return matches
 
-
 def product_location_results(product: pd.Series, location: pd.Series, config: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Check known constraints for one proposed placement."""
     config = dict(config or {})
     sku, location_id = product.get("SKU_ID"), location.get("Location_ID")
     results: list[dict[str, Any]] = []
@@ -104,7 +107,6 @@ def product_location_results(product: pd.Series, location: pd.Series, config: Ma
             results.append(_result(sku, location_id, "invalid_bin_dimension", "VIOLATION", invalid_bin_dimensions, "> 0", "Bin dimensions must be positive."))
         if not missing_bin_dimensions and not invalid_bin_dimensions and not fits_product(product, location, bool(config.get("allow_rotations", True))):
             results.append(_result(sku, location_id, "dimensional_fit", "VIOLATION", dims, bin_dimensions, "No permitted orientation fits this bin."))
-
     units, assumed_units, unit_note = _stock_units(product, config)
     if units is None:
         inventory_value = product.get("Inventory_Units")
@@ -129,7 +131,6 @@ def product_location_results(product: pd.Series, location: pd.Series, config: Ma
                 results.append(_result(sku, location_id, "location_weight_capacity", "UNVERIFIED", load, "unknown", "Location capacity is unavailable."))
             elif load > capacity:
                 results.append(_result(sku, location_id, "location_weight_capacity", "VIOLATION", load, capacity, "Modeled stock load exceeds location capacity."))
-
     ergonomics = config.get("ergonomics", {}) or {}
     threshold = _number(ergonomics.get("heavy_sku_weight_kg"))
     maximum_level = _number(ergonomics.get("max_shelf_level_for_heavy_skus"))
@@ -139,7 +140,6 @@ def product_location_results(product: pd.Series, location: pd.Series, config: Ma
             results.append(_result(sku, location_id, "ergonomic_shelf_height", "UNVERIFIED", "unknown", maximum_level, "Shelf level is unavailable."))
         elif level > maximum_level:
             results.append(_result(sku, location_id, "ergonomic_shelf_height", "VIOLATION", level, maximum_level, f"SKU weight {weight} kg exceeds configured threshold {threshold} kg."))
-
     for field in ("Hazard_Class", "Handling_Type"):
         value = product.get(field)
         if pd.isna(value) or value in ("", "UNSPECIFIED", "UNKNOWN"):
@@ -148,14 +148,10 @@ def product_location_results(product: pd.Series, location: pd.Series, config: Ma
         results.append(_result(sku, location_id, "configured_incompatibility", "VIOLATION", details, "allowed combination", "Matches a configured incompatibility rule."))
     return results
 
-
 def is_product_location_feasible(product: pd.Series, location: pd.Series, config: Mapping[str, Any] | None = None) -> bool:
-    """Reject only known violations; unknown source attributes remain unverified."""
     return not any(result["Status"] == "VIOLATION" for result in product_location_results(product, location, config))
 
-
 def validate_layout(layout: pd.DataFrame, skus: pd.DataFrame, locations: pd.DataFrame, config: Mapping[str, Any] | bool | None = None, allow_rotations: bool | None = None) -> pd.DataFrame:
-    """Return structured known violations and unverified checks for an allocation."""
     config = _config(config, allow_rotations)
     results: list[dict[str, Any]] = []
     if layout.empty:
@@ -176,7 +172,6 @@ def validate_layout(layout: pd.DataFrame, skus: pd.DataFrame, locations: pd.Data
     for location_id, group in layout.groupby("Location_ID", dropna=False):
         if len(group) > 1:
             results.append(_result("", location_id, "location_uniqueness", "VIOLATION", len(group), 1, "A location contains more than one SKU."))
-
     loads: list[dict[str, Any]] = []
     for sku, location_id in layout[["SKU_ID", "Location_ID"]].itertuples(index=False):
         sku_known, location_known = sku in products.index, location_id in locs.index
