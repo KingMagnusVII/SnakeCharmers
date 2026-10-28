@@ -38,15 +38,22 @@ export async function loadBackendData(): Promise<void> {
       fetch(`${base}/api/overview`).then(r=>{if(!r.ok) throw new Error(`overview ${r.status}`);return r.json()}),
       fetch(`${base}/api/routes`).then(r=>{if(!r.ok) throw new Error(`routes ${r.status}`);return r.json()})
     ]);
+    // A reachable API can still have no generated pipeline CSVs. Do not replace
+    // the usable demo dataset with empty arrays and incorrectly label it live.
+    if (!Array.isArray(inv) || inv.length === 0 || !Array.isArray(nodes) || nodes.length === 0) {
+      throw new Error("API is reachable but inventory/warehouse outputs are empty. Run the pipeline first.");
+    }
     inventory=inv as InventoryItem[];
     warehouseNodes=nodes as WarehouseNode[];
     evaluation=overview.evaluation ?? {};
-    routeRows=routes as Record<string,unknown>[];
-    demoNotice="LIVE DATA // Magnus pipeline outputs";
+    routeRows=Array.isArray(routes) ? routes as Record<string,unknown>[] : [];
     dataReady=true;
+    demoNotice=routeRows.length
+      ? "LIVE DATA // Magnus pipeline outputs"
+      : "LIVE INVENTORY // route CSV missing; run the pipeline to generate optimized_routes.csv";
   } catch (error) {
     console.warn("Magnus API unavailable; using local demo fallback.",error);
-    demoNotice="OFFLINE FALLBACK // start scripts/api_server.py for live Magnus data";
+    demoNotice="DEMO FALLBACK // API data unavailable or pipeline outputs missing; run scripts\\run_pipeline.py, then restart the API";
     dataReady=false;
   }
 }
