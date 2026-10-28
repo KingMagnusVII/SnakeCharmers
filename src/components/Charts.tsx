@@ -15,9 +15,9 @@ function ThreeDBarChart({ labels, values }: { labels: string[]; values: number[]
         <strong style={{ color: colors[i % colors.length], fontSize: 12 }}>{values[i].toLocaleString("en-IN")}</strong>
         <div style={{
           width: "65%", maxWidth: 62, height, position: "relative", transform: "skewY(-8deg)",
-          transformStyle: "preserve-3d", background: \`linear-gradient(90deg, \${colors[i % colors.length]}55, \${colors[i % colors.length]})\`,
-          boxShadow: \`8px 8px 0 \${colors[i % colors.length]}33, 0 0 20px \${colors[i % colors.length]}22\`,
-          borderTop: \`2px solid \${colors[i % colors.length]}\`, borderRadius: "4px 4px 0 0",
+          transformStyle: "preserve-3d", background: `linear-gradient(90deg, ${colors[i % colors.length]}55, ${colors[i % colors.length]})`,
+          boxShadow: `8px 8px 0 ${colors[i % colors.length]}33, 0 0 20px ${colors[i % colors.length]}22`,
+          borderTop: `2px solid ${colors[i % colors.length]}`, borderRadius: "4px 4px 0 0",
         }} />
         <span style={{ fontSize: 10, textAlign: "center", color: "#9aabc1", overflowWrap: "anywhere" }}>{label}</span>
       </div>;
@@ -30,9 +30,9 @@ function ThreeDPieChart({ labels, values }: { labels: string[]; values: number[]
   let cursor = 0;
   const segments = values.map((value, i) => {
     const start = cursor; cursor += total ? value / total * 100 : 0;
-    return \`\${colors[i % colors.length]} \${start}% \${cursor}%\`;
+    return `${colors[i % colors.length]} ${start}% ${cursor}%`;
   });
-  const gradient = \`conic-gradient(\${segments.join(", ")})\`;
+  const gradient = `conic-gradient(${segments.join(", ")})`;
   return <div style={{ ...panelStyle, display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 28 }}>
     <div style={{ width: 180, height: 180, flexShrink: 0, position: "relative", marginTop: -10 }}>
       <div style={{ position: "absolute", inset: "15px 0 -10px", borderRadius: "50%", background: gradient, filter: "brightness(0.48)", transform: "rotateX(58deg)", boxShadow: "0 16px 20px #0008" }} />
@@ -74,7 +74,7 @@ export function RouteChart() {
       <span>COMPLETE <b>{complete.toLocaleString("en-IN")}</b></span>
     </div>
     <div className="route-bars">{distances.slice(0, 60).map((distance, i) =>
-      <i key={i} title={\`\${distance.toFixed(1)} m\`} style={{ height: \`\${Math.max(3, distance / max * 100)}%\` }} />
+      <i key={i} title={`${distance.toFixed(1)} m`} style={{ height: `${Math.max(3, distance / max * 100)}%` }} />
     )}</div>
     <p>OPTIMIZED ROUTE OUTPUT // MAGNUS PIPELINE</p>
   </div>;
@@ -90,7 +90,7 @@ export function TrendChart() {
       {([["BASELINE", baseline], ["OPTIMIZED", optimized]] as [string, number][]).map(([label, value], i) =>
         <div key={label}>
           <strong>{value.toLocaleString("en-IN", { maximumFractionDigits: 1 })} m</strong>
-          <div className="comparison-bar" style={{ height: \`\${Math.max(12, value / max * 160)}px\`, background: colors[i] }} />
+          <div className="comparison-bar" style={{ height: `${Math.max(12, value / max * 160)}px`, background: colors[i] }} />
           <span>{label}</span>
         </div>
       )}
