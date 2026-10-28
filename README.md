@@ -55,8 +55,8 @@ SnakeCharmers is a **reproducible research prototype** that uses historical Olis
 > Windows PowerShell, run from the repository root.
 
 ```powershell
-git checkout Magnus
-git pull origin Magnus
+git checkout main
+git pull origin main
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\python.exe -m scripts.run_pipeline
