@@ -236,7 +236,7 @@ def main() -> None:
             f"{row['Known_Violations']} |"
         )
     (reports / "assortment_strategy_comparison.md").write_text(
-        "\\n".join(strategy_lines) + "\\n", encoding="utf-8"
+        "\n".join(strategy_lines) + "\n", encoding="utf-8"
     )
 
     (reports / "data_foundation_audit.md").write_text(
