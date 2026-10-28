@@ -26,11 +26,13 @@ def route_orders(orders, layout, locations, max_orders=500, include_zero_pick_or
     # Store one route record per simulated order.
     records = []
 
-    # Process orders in deterministic Order_ID order. The historical sample
-    # counts only orders with at least one pickable SKU; source-order coverage
-    # can opt into counting zero-pick orders as well.
-    for order_id, group in orders.groupby("Order_ID", sort=True):
-        if len(records) >= max_orders:
+    # Preserve the historical sample boundary: inspect only the first
+    # max_orders source orders. By default, zero-pick orders are skipped
+    # within that boundary; source-coverage mode records them explicitly.
+    for order_number, (order_id, group) in enumerate(
+        orders.groupby("Order_ID", sort=True)
+    ):
+        if order_number >= max_orders:
             break
 
         # Deduplicate repeated SKU lines within the same order.
