@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.affinity_analysis import compute_affinity
-from src.baseline import allocate_baseline
+from src.baseline import allocate_baseline, select_order_coverage_candidates
 from src.data_loader import load_olist_raw, normalize_olist
 from src.demand_analysis import analyze_demand
 from src.evaluation import compare, evaluate
@@ -161,6 +161,62 @@ def main() -> None:
     optimized_metrics = evaluate(optimized_routes, optimized, profile, locations, config)
     comparison = compare(baseline_metrics, optimized_metrics)
     comparison.to_csv(out / "evaluation_comparison.csv", index=False)
+
+    # Compare the current demand-ranked assortment with an order-coverage-first
+    # assortment under the same dimensional, rack-load, and layout constraints.
+    coverage_candidates = select_order_coverage_candidates(
+        profile, locations, scoped, config
+    )
+    coverage_baseline, coverage_excluded = allocate_baseline(
+        profile, locations, config, candidates=coverage_candidates
+    )
+    coverage_affinity = compute_affinity(scoped, set(coverage_baseline.SKU_ID))
+    coverage_optimized, coverage_opt_info = optimize_and_refine_layout(
+        profile,
+        locations,
+        coverage_baseline,
+        coverage_affinity,
+        scoped,
+        config,
+    )
+    coverage_routes = route_orders(scoped, coverage_optimized, locations)
+    coverage_metrics = evaluate(
+        coverage_routes, coverage_optimized, profile, locations, config
+    )
+    strategy_comparison = __import__("pandas").DataFrame(
+        [
+            {
+                "Strategy": "Demand-ranked (current)",
+                "Allocated_SKUs": int(baseline.SKU_ID.nunique()),
+                "Unallocated_selected_SKUs": int(len(excluded)),
+                "Complete_Orders": int(baseline_metrics["complete_orders"]),
+                "Completion_Rate": float(baseline_metrics["completion_rate"]),
+                "Total_Route_Distance_m": float(baseline_metrics["total_distance_m"]),
+                "Known_Violations": int(baseline_validation["known_violations"]),
+            },
+            {
+                "Strategy": "Order-coverage-first",
+                "Allocated_SKUs": int(coverage_optimized.SKU_ID.nunique()),
+                "Unallocated_selected_SKUs": int(len(coverage_excluded)),
+                "Complete_Orders": int(coverage_metrics["complete_orders"]),
+                "Completion_Rate": float(coverage_metrics["completion_rate"]),
+                "Total_Route_Distance_m": float(coverage_metrics["total_distance_m"]),
+                "Known_Violations": int(
+                    _validation_summary(
+                        validate_layout(
+                            coverage_optimized, skus, locations, config
+                        )
+                    )["known_violations"]
+                ),
+            },
+        ]
+    )
+    strategy_comparison.to_csv(
+        out / "assortment_strategy_comparison.csv", index=False
+    )
+    strategy_comparison.to_markdown(
+        reports / "assortment_strategy_comparison.md", index=False
+    )
 
     (reports / "data_foundation_audit.md").write_text(
         "# Data foundation audit\n\n"
