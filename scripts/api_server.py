@@ -80,7 +80,7 @@ def inventory() -> list[dict]:
             "Location_ID": row.get("Location_ID", ""),
             "Units": None,  # Olist has no current stock snapshot; do not invent on-hand counts.
             "Capacity": number(loc.get("Volumetric_Capacity_cm3", 0)),
-            "Status": "STOCK UNKNOWN",  # Allocation is not current stock availability.
+            "Status": "ALLOCATED",  # Allocation status is separate from unknown on-hand stock.
             "Unit_Value": 0,
         })
     return rows
@@ -161,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                     "baseline_unverified": sum(row.get("Status") == "UNVERIFIED" for row in baseline),
                     "optimized_unverified": sum(row.get("Status") == "UNVERIFIED" for row in optimized),
                     "rows": rows,
-                    "available": bool(baseline or optimized),
+                    "available": (PROCESSED / "baseline_violations.csv").exists() and (PROCESSED / "optimized_violations.csv").exists(),
                 })
             if path == "/api/downloads":
                 return json_response(self, {"files": processed_files()})
