@@ -1,12 +1,56 @@
-# SnakeCharmers — Smart Warehouse Slotting & Optimization
+<div align="center">
 
-A reproducible research prototype that uses historical Olist e-commerce order data to profile SKU demand, forecast next-week demand, allocate a configurable active assortment to a **synthetic** warehouse, optimize slotting with a constraint-aware greedy heuristic, simulate picking routes, and compare the baseline and optimized layouts.
+# 🐍 SnakeCharmers
 
-> **Important:** this is a simulation, not a deployment-ready warehouse safety system. The source dataset is historical (2016–2018), has no current inventory snapshot, and does not provide dependable hazard/handling classifications. Warehouse geometry and route distances are synthetic. Unknown safety data must remain unverified.
+### Smart Warehouse Slotting & Optimization
 
-## Quick start (Windows PowerShell)
+*Forecast demand. Slot smarter. Walk less.*
 
-Run commands from the repository root:
+![Python](https://img.shields.io/badge/Python-3.15-3776AB?logo=python&logoColor=white)
+![pandas](https://img.shields.io/badge/pandas-3.x-150458?logo=pandas&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-Ridge-F7931E?logo=scikitlearn&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-dashboard-FF4B4B?logo=streamlit&logoColor=white)
+![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
+![Status](https://img.shields.io/badge/status-research%20prototype-orange)
+
+[Overview](#-overview) · [Quick start](#-quick-start) · [Data](#-input-data-kaggle--olist) · [How it works](#-how-it-works) · [Configuration](#%EF%B8%8F-configuration) · [Results](#-latest-results) · [Roadmap](#-roadmap)
+
+</div>
+
+---
+
+## 📖 Overview
+
+SnakeCharmers is a **reproducible research prototype** that uses historical Olist e-commerce orders to decide *where each product should live in a warehouse* so pickers walk less.
+
+| Step | What happens |
+|:---:|---|
+| 1 | 📊 Profile SKU demand and assign ABC classes |
+| 2 | 🔮 Forecast next-week demand per SKU |
+| 3 | 🏭 Allocate an active assortment to a **synthetic** warehouse |
+| 4 | 🧭 Optimize slotting (constraint-aware greedy + bounded local search) |
+| 5 | 🚶 Simulate picking routes |
+| 6 | ⚖️ Compare baseline vs. optimized layouts and show them in a dashboard |
+
+> [!IMPORTANT]
+> This is a **simulation, not a deployment-ready warehouse safety system.** The source data is historical (2016–2018), has no current inventory snapshot, and provides no dependable hazard/handling classifications. Warehouse geometry and route distances are synthetic. **Unknown safety data must remain unverified.**
+
+### At a glance
+
+| | |
+|---|---|
+| **Forecast model** | Ridge regression on weekly order-line counts |
+| **Optimizer** | Rule-based greedy heuristic + bounded swap local search (not a trained model) |
+| **Routing** | Nearest-next-SKU, Manhattan distance |
+| **Warehouse** | Synthetic: 6 aisles × 2 rack sides × 5 bays × 4 shelf levels, plus 4 oversized slots |
+| **Active assortment** | 200 SKUs (configurable) |
+| **Interface** | Streamlit dashboard + CSV/Markdown reports |
+
+---
+
+## 🚀 Quick start
+
+> Windows PowerShell, run from the repository root.
 
 ```powershell
 git checkout Magnus
@@ -18,7 +62,10 @@ git pull origin Magnus
 .venv\Scripts\python.exe -m streamlit run dashboard.py
 ```
 
-If setting up from scratch:
+Streamlit prints a local URL; open it in a browser and stop the server with `Ctrl+C`.
+
+<details>
+<summary><b>Setting up from scratch</b></summary>
 
 ```powershell
 py -m venv .venv
@@ -26,177 +73,366 @@ py -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-The Streamlit command prints a local URL. Open it in a browser and stop the server with Ctrl+C.
+</details>
 
-## Input data: Kaggle / Olist
+### Command cheat sheet
 
-Source: [Olist Brazilian E-Commerce Public Dataset on Kaggle](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). The original dataset covers Brazilian marketplace orders from 2016–2018. Raw data is not committed to this repository.
+| Goal | Command |
+|---|---|
+| Download raw Olist data | `python -m scripts.download_olist` |
+| Normalize raw data | `python -m scripts.prepare_data` |
+| Exploratory analysis | `python -m scripts.run_eda` |
+| Run the full pipeline | `python -m scripts.run_pipeline` |
+| Re-validate saved layouts (no regeneration) | `python scripts/validate_saved_layouts.py` |
+| Run tests | `python -m pytest -q` |
+| Launch dashboard | `python -m streamlit run dashboard.py` |
 
-Download and prepare the data from the repository root:
+> [!TIP]
+> The dashboard reads only generated files from `data/processed/`. If it shows "generated outputs are missing", run the pipeline first.
+
+---
+
+## 📦 Input data: Kaggle / Olist
+
+**Source:** [Olist Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (Brazilian marketplace orders, 2016–2018). Raw data is **not** committed to this repository.
 
 ```powershell
 .venv\Scripts\python.exe -m scripts.download_olist
 .venv\Scripts\python.exe -m scripts.prepare_data
 ```
 
-The download requires Kaggle account access, acceptance of dataset terms, and Kaggle API credentials. The project currently loads **only three of the nine original Olist CSVs**. The other Olist tables are not currently model inputs.
+> [!NOTE]
+> The download requires a Kaggle account, acceptance of the dataset terms, and Kaggle API credentials (never commit `kaggle.json`). The project loads **only 3 of the 9** original Olist CSVs.
 
-### Exact raw CSV columns used by this code
+### Raw columns used
 
-| Olist CSV | Columns required/read by this project | How the project uses them |
+| Olist CSV | Columns read | How they are used |
 |---|---|---|
-| `olist_orders_dataset.csv` | `order_id`, `order_purchase_timestamp`, `order_status` | Join key, demand timestamp, and filter for demand status. Other order columns are not currently used. |
-| `olist_order_items_dataset.csv` | `order_id`, `order_item_id`, `product_id`, `price`, `freight_value` | Order/SKU relationship; item ID; price and freight retained in normalized data. Each recorded order-item row is treated as one demand-line observation. |
-| `olist_products_dataset.csv` | `product_id`, `product_category_name`, `product_weight_g`, `product_length_cm`, `product_height_cm`, `product_width_cm` | SKU identifier, category, dimensions, and weight. Weight is converted from grams to kilograms; length is mapped to project depth. |
+| `olist_orders_dataset.csv` | `order_id`, `order_purchase_timestamp`, `order_status` | Join key, demand timestamp, demand-status filter |
+| `olist_order_items_dataset.csv` | `order_id`, `order_item_id`, `product_id`, `price`, `freight_value` | Order/SKU relationship; price and freight kept in normalized data. Each order-item row = one demand-line observation |
+| `olist_products_dataset.csv` | `product_id`, `product_category_name`, `product_weight_g`, `product_length_cm`, `product_height_cm`, `product_width_cm` | SKU ID, category, dimensions, weight (g → kg). Length is mapped to depth |
 
-The following original files are **not currently read by the pipeline**: `olist_customers_dataset.csv`, `olist_order_payments_dataset.csv`, `olist_order_reviews_dataset.csv`, `olist_sellers_dataset.csv`, `olist_geolocation_dataset.csv`, and `product_category_name_translation.csv`. Fields in those files must not be described as current model features. They may be considered in a future version only if they support a clearly defined warehouse objective and can be joined/validated correctly.
+<details>
+<summary><b>Files <u>not</u> read by the pipeline</b></summary>
 
-### Source-to-project transformations and limitations
+`olist_customers_dataset.csv`, `olist_order_payments_dataset.csv`, `olist_order_reviews_dataset.csv`, `olist_sellers_dataset.csv`, `olist_geolocation_dataset.csv`, `product_category_name_translation.csv`.
 
-- Raw `order_id` becomes `Order_ID`; `product_id` becomes `SKU_ID`; `order_purchase_timestamp` becomes `Timestamp`; `order_status` becomes `Order_Status`.
-- Olist's order-item table has no reliable explicit item quantity field. The project sets normalized `Quantity = 1.0` for each recorded item line. Forecast demand therefore means **recorded order-item lines**, not verified physical units sold or units currently in stock.
-- The demand scope is controlled by `demand_statuses`, currently `["delivered"]`.
-- Product dimensions are used for physical fit checks. `Volume_cm3` is calculated as width × height × depth; rotation is checked against bin dimensions when enabled.
-- `Hazard_Class` and `Handling_Type` are set to `UNSPECIFIED`; `Inventory_Units` is missing because the source data does not contain a current inventory snapshot.
-- The configured `representative_inventory_units = 1` is a **simulation fallback**, not an observed quantity. Validation still marks the corresponding inventory checks as `UNVERIFIED`.
-- Do not infer hazard class, safe handling, or storage compatibility from a product category name.
+Fields in these files must **not** be described as current model features. They may be considered in future only if they support a clearly defined warehouse objective and can be joined and validated correctly.
 
-## Current AI / optimization pipeline
+</details>
 
-There are two distinct components: (1) a supervised **Ridge regression demand forecast**, and (2) a rule/heuristic-based **slotting optimizer**. The second component is not itself a trained AI model.
+### Transformations & limitations
 
-### 1. Demand forecast — current model and every feature
+| Raw field | Project field |
+|---|---|
+| `order_id` | `Order_ID` |
+| `product_id` | `SKU_ID` |
+| `order_purchase_timestamp` | `Timestamp` |
+| `order_status` | `Order_Status` |
 
-Implementation: `src/ml_demand.py`.
+- **Quantity:** Olist has no reliable item-quantity field, so `Quantity = 1.0` per recorded item line. Forecast demand therefore means **recorded order-item lines**, not verified units sold or in stock.
+- **Demand scope:** controlled by `demand_statuses` (currently `["delivered"]`).
+- **Fit checks:** `Volume_cm3 = width × height × depth`; rotation is checked against bin dimensions when enabled.
+- **Unknown attributes:** `Hazard_Class` and `Handling_Type` are `UNSPECIFIED`; `Inventory_Units` is missing (no stock snapshot in the source).
+- **Inventory fallback:** `representative_inventory_units = 1` is a **simulation assumption**, not an observed quantity. Validation still marks inventory checks `UNVERIFIED`.
+- ⚠️ Never infer hazard class, safe handling, or storage compatibility from a product category name.
 
-| Setting / feature | Current value or definition | Role |
-|---|---|---|
-| Estimator | scikit-learn `Ridge` regression | Predicts next-week SKU demand. |
-| Ridge regularization `alpha` | `1.0` | Controls coefficient regularization. |
-| Prediction target | Weekly count of recorded order-item lines per SKU | Target is transformed with `log1p` during training. |
-| Forecast horizon | Next week | One-step-ahead forecast for each SKU. |
-| `Lag_1` | Previous week's recorded line count | Recent demand signal. |
-| `Lag_4` | Recorded line count four weeks earlier | Seasonal/recent-history signal; it is not a full seasonal model. |
-| `Rolling_4` | Mean of up to the previous four weekly counts, shifted so the current target week is excluded | Recent demand level. |
-| `Historical_Mean` | Expanding mean of previous weekly counts, shifted to exclude the current target week | Longer-term SKU demand level. |
-| `Week_Index` | Number of weeks from the first observed week, as a numeric trend | Captures a simple time trend. |
-| `Category` | Olist `product_category_name`, mapped to normalized `Category` | Product context, one-hot encoded. |
+---
 
-**Preprocessing and training behavior**
+## 🧠 How it works
 
-- Demand observations are filtered to configured `demand_statuses` (currently `delivered`).
-- Timestamps are converted to dates and bucketed into weekly periods. Missing SKU/week combinations are filled with zero demand.
-- Training rows require non-missing `Lag_1`, `Lag_4`, `Rolling_4`, and `Historical_Mean`. Training is skipped if fewer than 20 rows remain.
-- Numeric features use median imputation followed by `StandardScaler`.
-- `Category` uses most-frequent imputation and `OneHotEncoder(handle_unknown="ignore")`.
-- The Ridge model is trained on `log1p(weekly_demand)`; predictions are transformed back with `expm1` and clipped to be non-negative.
-- If there are no valid timestamps or too few rows, the model reports `trained = false` and the initialized predictions remain zero. Check the generated ML report for actual run status.
-- This code currently fits on the available historical series and produces the next-week forecast. It does **not yet report a proper held-out, rolling-origin forecast score**; that is required before claiming the model is accurate.
+Two distinct components work together:
 
-### 2. How the forecast influences slotting
+| # | Component | Module | Type |
+|:---:|---|---|---|
+| 1 | **Demand forecast** | `src/ml_demand.py` | Supervised **Ridge regression** |
+| 2 | **Slotting optimizer** | `src/optimizer.py` | Rule-based **greedy heuristic** + bounded local search (not a trained model) |
 
-Implementation: `src/optimizer.py`.
+### Pipeline
 
-- SKUs are considered in descending `Predicted_Next_Week_Demand` order (SKU ID breaks ties). High forecast demand therefore gets first access to feasible locations.
-- Hard feasibility checks include dimensional fit, location volume/weight limits, configured shelf/rack loads, and configured incompatibility rules. Unknown hazard/handling information is reported as unverified, not as proof of safety.
-- Candidate-location score currently minimizes:
-
-  `distance_weight × depot_distance + ergonomic_weight × heavy_shelf_penalty − affinity_weight × affinity_proximity_bonus`
-
-- The current objective weights are `distance = 1.0`, `affinity = 0.25`, and `ergonomic = 0.1`.
-- The ergonomic penalty is currently based on shelf level and whether product weight exceeds the hard-coded 10 kg condition inside the optimizer. The validator separately uses the configured ergonomic threshold; these should be unified in a future cleanup.
-- Affinity is computed from SKUs appearing together in the same order. Pair strength is `log1p(Pair_Count) × log1p(Lift)`; affinity proximity rewards placing related SKUs near each other using Manhattan distance normalized by the maximum depot-distance value.
-- The baseline allocator is deterministic and historically demand-ranked; the optimized allocator uses the ML forecast priority. Both are evaluated on the same baseline-selected active assortment.
-- This is a one-pass greedy heuristic. It does not prove global optimality or guarantee that a better layout cannot exist.
-
-### 3. Configuration parameters
-
-The main run configuration is `config/simulation_config.json`.
-
-| Parameter | Current value | What it controls / status |
-|---|---|---|
-| `demand_statuses` | `["delivered"]` | Which order lines enter demand analysis, forecasting, affinity, and route simulation. |
-| `max_active_skus` | `500` | Maximum assortment size selected for allocation/evaluation. |
-| `representative_inventory_units` | `1` | Fallback used when observed inventory is absent; simulation assumption only. |
-| `inventory_simulation.coverage_days` | `14` | Starting-stock coverage estimated from earlier training orders only; simulated units, not actual inventory. |
-| `inventory_simulation.train_fraction` | `0.8` | Fraction of unique order timestamps assigned to the chronological training period. |
-| `inventory_simulation.max_test_orders` | `0` | `0` evaluates all later test orders; a positive value limits evaluation to the earliest later orders. |
-| `allow_rotations` | `true` | Allows dimension permutations when checking physical fit. |
-| `ergonomics.heavy_sku_weight_kg` | `10.0` | Configured weight threshold used by feasibility validation. |
-| `ergonomics.max_shelf_level_for_heavy_skus` | `2` | Configured maximum shelf level for heavy SKUs in validation. |
-| `incompatibility_rules.category_hazard_pairs` | `[]` | Explicit category/hazard incompatibility rules; none currently supplied. |
-| `incompatibility_rules.hazard_handling_pairs` | `[]` | Explicit hazard/handling incompatibility rules; none currently supplied. |
-| `abc_thresholds` | A: `0.80`, B: `0.95` | Cumulative demand-share thresholds for ABC classification. |
-| `affinity_min_pair_count` | `2` | Declared setting, but the current pipeline does not pass it into `compute_affinity`; the function's default `min_pair_count=1` is therefore used. |
-| `affinity_min_support` | `0.0` | Declared setting, but the current pipeline does not pass it into `compute_affinity`; the function's default `min_support=0.0` is therefore used. |
-| `walking_speed_m_per_min` | `75.0` | Assumed speed for estimated picking time, not measured speed. |
-| `pick_handling_seconds` | `12.0` | Assumed handling time per simulated order. |
-| `objective_weights.distance` | `1.0` | Weight on depot distance in greedy candidate score. |
-| `objective_weights.affinity` | `0.25` | Weight on affinity proximity bonus. |
-| `objective_weights.ergonomic` | `0.1` | Weight on the optimizer's shelf-level penalty. |
-| `objective_weights.waste` | `0.00001` | Present in config but not currently used by the greedy optimizer. |
-| `random_seed` | `42` | Present in config; current pipeline stages described here are deterministic and do not currently consume this setting. |
-| `max_local_search_iterations` | `100` | Present in config but not currently used; the current optimizer performs one greedy pass. |
-
-The current routing simulation also has `max_orders=500` as a default argument in `src/routing.py`. The current Ridge implementation uses fixed settings in code (`alpha=1.0`, median imputation, standard scaling, most-frequent category imputation, one-hot encoding, and a minimum of 20 training rows); these are not currently exposed as JSON configuration parameters.
-
-Warehouse geometry is configured separately in `config/warehouse_config.json`: 13 aisles; two rack sides per aisle; 5 bays per rack; 4 shelf levels (520 standard locations plus 4 oversized locations, 524 total); aisle spacing 3.0 m; bay spacing 1.2 m; first aisle X = 3.0 m; first bay Y = 2.0 m; default bin dimensions 40 × 30 × 40 cm; levels 1 and 2 use 100 × 60 × 60 cm bins; level weight capacities 40/35/30/20 kg; shelf limit 200 kg; rack limit 700 kg; and four dedicated oversized slots with their own configured dimensions, capacities, and coordinates. These are synthetic assumptions and must be replaced with measured site data for a real warehouse.
-
-## Future AI upgrade plan
-
-A more powerful model should be introduced only after a reproducible evaluation proves it improves on Ridge. Recommended staged plan:
-
-1. **Establish a trustworthy baseline:** add chronological rolling-origin/backtesting splits so every validation forecast uses only data available before that forecast week. Report MAE, RMSE, and WAPE (with the WAPE zero-denominator case handled explicitly), overall and by demand segment/category. Compare against simple naïve baselines such as last-week demand and recent moving average.
-2. **Benchmark stronger tabular models:** test gradient-boosted trees such as HistGradientBoosting or an available LightGBM/CatBoost option against Ridge using identical time splits and features. Evaluate global models across SKUs; do not assume a deep neural network is automatically better for this dataset.
-3. **Add features only when justified:** test calendar/seasonality features, richer lag windows, promotion/price signals if reliable, and product attributes. Avoid data leakage: no feature may use future order information. Olist's short historical period and old data should be explicitly considered.
-4. **Improve the slotting optimizer separately:** benchmark local search, simulated annealing, or a formal constraint solver such as OR-Tools against the current greedy result. Keep hard feasibility constraints separate from soft objectives and report runtime/solution quality.
-5. **Use a fair acceptance gate:** preserve the current Ridge + greedy version as a baseline. Adopt a replacement only when time-based test performance and end-to-end slotting metrics improve consistently, runtime is acceptable, tests pass, and safety/inventory data quality is not hidden by the model.
-
-Potential future model inputs should be documented by exact source field, transformation, missing-value treatment, and whether each feature is available at prediction time. Do not include customer/review/payment/geolocation fields just because they exist in Kaggle; first show that they improve a defined warehouse demand or routing objective without leakage.
-
-## Chronological inventory holdout experiment
-
-The pipeline also writes a separate, time-ordered inventory-and-picking experiment under `reports/inventory_holdout_experiment.md` and CSVs under `data/processed/inventory_holdout_*`.
-
-- Orders are split chronologically: the first 80% of distinct timestamps form the training period, and later timestamps form the test period. No test-period demand is used to estimate starting stock, select the assortment, calculate co-order affinity, train the demand forecast, or refine slotting.
-- Per-SKU starting stock is estimated as `ceil(training-period recorded order-item lines per day × 14 days)`. Because Olist has no explicit item-quantity or on-hand-inventory field, each recorded item line is a one-unit demand proxy. These are **simulated starting inventory quantities, not actual Kaggle inventory**.
-- The active assortment and baseline/optimized layouts are built from training-period demand. Both layouts must contain the same SKU assortment and are replayed against the exact same later test orders and starting-stock estimates.
-- Orders are replayed chronologically. An order is fulfilled only if all requested SKUs are allocated and enough simulated stock remains; only fulfilled orders deplete stock. Unallocated SKU demand is reported separately from stockouts. Routes are calculated for fulfilled orders, and the per-SKU ledger records starting stock, depletion, remaining stock, and stockout events/units.
-- By default, all later test orders are evaluated (`max_test_orders: 0`). Set a positive limit to evaluate only the earliest later orders. Configuration lives in `config/simulation_config.json` under `inventory_simulation`.
-- This experiment evaluates a stock-aware simulation and estimated walking routes, not verified real-world stock, measured walking distance, or globally optimal picking.
-
-## Pipeline stages
+```mermaid
+flowchart TD
+    A[Load & normalize<br/>3 Olist tables] --> B[Demand profile<br/>+ ABC classes]
+    B --> C[Ridge forecast<br/>next-week demand]
+    B --> F[Baseline<br/>allocation]
+    E[Synthetic<br/>warehouse] --> F
+    F --> D[Affinity<br/>co-occurrence]
+    C --> G[Greedy optimizer]
+    D --> G
+    F --> G
+    G --> L[Bounded swap<br/>local search]
+    L --> S{Pick lowest-distance<br/>feasible candidate}
+    F --> S
+    S --> H[Route simulation<br/>Manhattan distance]
+    F --> H
+    H --> I[Evaluation<br/>& reports]
+    I --> J[Streamlit<br/>dashboard]
+```
 
 1. Load and normalize the three required Olist tables.
-2. Build demand profile and ABC demand classes.
+2. Build the demand profile and ABC demand classes.
 3. Forecast next-week demand with Ridge.
-4. Compute SKU co-occurrence affinity.
-5. Generate synthetic warehouse locations.
-6. Allocate the active assortment using a deterministic feasible baseline.
-7. Reassign feasible slots using forecast priority, distance, affinity, and ergonomic heuristics.
-8. Simulate nearest-next-SKU picking routes using Manhattan distance.
-9. Compare route distance/time, coverage, utilization, and validation completeness.
-10. Save reports and CSV outputs for the Streamlit dashboard.
+4. Generate the synthetic warehouse locations.
+5. Allocate the active assortment with a deterministic, feasible **baseline** (independent of ML).
+6. Compute SKU co-occurrence affinity on that same assortment.
+7. Reassign feasible slots using forecast priority, distance, affinity, and ergonomic heuristics (**greedy**).
+8. Run a bounded, deterministic **swap local search** on the greedy layout (**refined**).
+9. Validate `baseline`, `greedy`, and `refined`; keep only candidates with 0 confirmed violations and select the one with the lowest simulated route distance.
+10. Simulate nearest-next-SKU picking routes (Manhattan distance) for baseline and selected layout.
+11. Compare route distance/time, coverage, utilization, and validation completeness.
+12. Save reports and CSVs for the dashboard.
 
-## Outputs
+> [!NOTE]
+> Because the selection gate can pick the baseline, a run is allowed to show **no improvement**. Check `reports/optimization_report.md` (`selected_layout`, `candidate_layouts`) to see which layout won in your run.
 
-Generated CSVs are written under `data/processed/` (typically ignored by Git); reports are written under `reports/`. Important reports include:
+### 🔮 1. Demand forecast
 
-- `data_foundation_audit.md`
-- `eda_report.md`
-- `ml_demand_report.md`
-- `optimization_report.md`
-- `unallocated_sku_diagnosis.md`
-- `final_validation_report.md`
+| Setting / feature | Definition | Role |
+|---|---|---|
+| Estimator | scikit-learn `Ridge`, `alpha = 1.0` | Predicts next-week SKU demand |
+| Target | Weekly count of order-item lines per SKU, trained on `log1p` | One-step-ahead forecast |
+| `Lag_1` | Previous week's line count | Recent demand signal |
+| `Lag_4` | Line count four weeks earlier | Recent-history signal (not a full seasonal model) |
+| `Rolling_4` | Mean of up to the previous four weeks (shifted, excludes target week) | Recent demand level |
+| `Historical_Mean` | Expanding mean of previous weeks (shifted, excludes target week) | Long-term SKU level |
+| `Week_Index` | Weeks since first observed week | Simple time trend |
+| `Category` | Normalized `product_category_name`, one-hot encoded | Product context |
 
-## Interpreting results safely
+<details>
+<summary><b>Preprocessing & training behavior</b></summary>
 
-- **Active assortment coverage** is the percentage of selected SKUs allocated; it is not coverage of the full product catalog.
-- **Catalog-wide allocation coverage** uses the full SKU profile as its denominator and can be low when only a limited assortment is modeled.
-- **Whole-warehouse utilization** and **allocated-bin utilization** have different capacity denominators.
-- **Confirmed violations** and **UNVERIFIED checks** are separate. Unknown inventory, hazard, or handling attributes are not evidence that a layout is safe.
-- **Demand forecast** estimates next-week recorded order-line counts from historical Olist records; it is not a real-time inventory or replenishment system.
-- **Route distance/time** are estimates from a simplified synthetic geometry, not measured warehouse performance.
-- The optimizer is a greedy heuristic, not a globally optimal solver.
+- Demand is filtered to configured `demand_statuses` and bucketed into weekly periods; missing SKU/week combinations are filled with zero.
+- Training rows need non-missing `Lag_1`, `Lag_4`, `Rolling_4`, `Historical_Mean`. Training is **skipped if fewer than 20 rows** remain.
+- Numeric features: median imputation → `StandardScaler`. `Category`: most-frequent imputation → `OneHotEncoder(handle_unknown="ignore")`.
+- Predictions are transformed back with `expm1` and clipped to be non-negative.
+- With no valid timestamps or too few rows, the model reports `trained = false` and predictions stay zero. Check the generated ML report for actual run status.
 
-See [HANDOVER.md](HANDOVER.md) for setup, verification checklist, known limitations, and transfer notes.
+</details>
+
+> [!WARNING]
+> The model currently fits on the available history and forecasts next week. It does **not yet report a held-out, rolling-origin score**. This is required before claiming the model is accurate.
+
+### 🧭 2. How the forecast drives slotting
+
+- SKUs are processed in descending `Predicted_Next_Week_Demand` (SKU ID breaks ties), so high-demand SKUs get first pick of feasible locations.
+- **Hard constraints:** dimensional fit, location volume/weight limits, shelf/rack loads, heavy-SKU shelf height, and configured incompatibility rules. Unknown hazard/handling data is reported as *unverified*, never as proof of safety.
+- **Candidate score (minimized):**
+
+  ```text
+  distance_weight × depot_distance
+    + ergonomic_weight × heavy_shelf_penalty
+    − affinity_weight × affinity_proximity_bonus
+  ```
+
+- **Weights:** `distance = 1.0`, `affinity = 0.25`, `ergonomic = 0.1`.
+- **Affinity:** from SKUs sharing an order. Pair strength = `log1p(Pair_Count) × log1p(Lift)`. Proximity uses Manhattan distance normalized by the maximum depot distance.
+- **Local search:** up to `max_local_search_iterations` (100) feasible location swaps, accepted only when simulated route distance drops; one pass.
+- **Baseline vs optimized:** the baseline is deterministic and historically demand-ranked; the optimized layout uses ML forecast priority. Both are evaluated on the same baseline-selected active assortment.
+- This is a heuristic and **does not prove global optimality**.
+- **Known inconsistency:** the optimizer uses a hard-coded 10 kg heavy-SKU condition, while the validator uses the configured threshold. These should be unified.
+
+### 🛡️ 3. Validation rules
+
+`src/feasibility.py` provides one shared feasibility predicate used by the baseline, the optimizer, and the saved-layout validator:
+
+| Category | Checks |
+|---|---|
+| References | SKU/location references exist; assignment and location uniqueness |
+| Geometry | Dimension orientation and boundary fit; modeled bin volume |
+| Loads | Location, shelf, and rack load limits (aggregate loads use the inventory fallback) |
+| Ergonomics | Heavy SKUs only on allowed shelf levels |
+| Compatibility | Configured *known* incompatibilities only (none are inferred) |
+| Data quality | Invalid physical inputs; unverified inventory / hazard / handling inputs |
+
+Each check ends as `OK`, `VIOLATION`, or `UNVERIFIED`. See [Interpreting results safely](#%EF%B8%8F-interpreting-results-safely).
+
+---
+
+## ⚙️ Configuration
+
+Main run config: [`config/simulation_config.json`](config/simulation_config.json).
+
+| Parameter | Value | What it controls |
+|---|---|---|
+| `demand_statuses` | `["delivered"]` | Order lines used for demand, forecasting, affinity, routing |
+| `max_active_skus` | `200` | Max assortment size allocated/evaluated |
+| `representative_inventory_units` | `1` | Simulation fallback when inventory is absent |
+| `allow_rotations` | `true` | Allow dimension permutations in fit checks |
+| `ergonomics.heavy_sku_weight_kg` | `10.0` | Heavy-SKU threshold used by validation |
+| `ergonomics.max_shelf_level_for_heavy_skus` | `2` | Max shelf level for heavy SKUs in validation |
+| `incompatibility_rules.category_hazard_pairs` | `[]` | Category/hazard rules (none supplied) |
+| `incompatibility_rules.hazard_handling_pairs` | `[]` | Hazard/handling rules (none supplied) |
+| `abc_thresholds` | A `0.80`, B `0.95` | Cumulative demand-share ABC cut-offs |
+| `walking_speed_m_per_min` | `75.0` | Assumed walking speed (not measured) |
+| `pick_handling_seconds` | `12.0` | Assumed handling time per simulated order |
+| `objective_weights.distance` | `1.0` | Weight on depot distance |
+| `objective_weights.affinity` | `0.25` | Weight on affinity bonus |
+| `objective_weights.ergonomic` | `0.1` | Weight on shelf-level penalty |
+| `max_local_search_iterations` | `100` | Max swap attempts in the local-search refinement |
+
+<details>
+<summary><b>⚠️ Declared but not wired into the main pipeline</b></summary>
+
+| Parameter | Value | Status |
+|---|---|---|
+| `affinity_min_pair_count` | `2` | Used by `scripts/run_eda.py`, but **not** passed to `compute_affinity` in `run_pipeline.py` (function default `1` applies) |
+| `affinity_min_support` | `0.0` | Same as above (function default `0.0` applies) |
+| `objective_weights.waste` | `0.00001` | Not used by the optimizer |
+| `random_seed` | `42` | Pipeline stages are deterministic and don't consume it |
+
+Also: `max_orders = 500` is hard-coded in `src/routing.py` and the pipeline, and the Ridge settings (`alpha`, imputation, scaling, encoding, 20-row minimum) are fixed in code rather than exposed in JSON.
+
+</details>
+
+<details>
+<summary><b>🏭 Synthetic warehouse geometry</b> (<code>config/warehouse_config.json</code>)</summary>
+
+| Property | Value |
+|---|---|
+| Aisles | 6 (two rack sides each), grouped into zones A (1–2), B (3–4), C (5–6) |
+| Bays per rack / shelf levels | 5 / 4 |
+| Aisle spacing / bay spacing | 3.0 m / 1.2 m |
+| First aisle X / first bay Y | 3.0 m / 2.0 m |
+| Dispatch depot | (0, 0, 0) |
+| Default bin | 40 × 30 × 40 cm (W × H × D) |
+| Levels 1–2 bins | 100 × 60 × 60 cm |
+| Weight capacity by level (1 → 4) | 40 / 35 / 30 / 20 kg |
+| Shelf / rack limit | 200 kg / 700 kg |
+| Oversized slots | 4 dedicated (3 × 70×20×70 cm, 1 × 110×20×20 cm), 40 kg each |
+
+All values are **synthetic assumptions** and must be replaced with measured site data for a real warehouse.
+
+</details>
+
+---
+
+## 📈 Latest results
+
+From the maintainer's latest recorded local run on 2026-10-28 (see [HANDOVER.md](HANDOVER.md)): 500 simulated orders, 494 complete routes per strategy.
+
+| Metric | Baseline | Optimized | Change |
+|---|---:|---:|---:|
+| Total route distance | 13,191.2 m | 11,591.6 m | **−1,599.6 m (≈ −12.13%)** |
+| Estimated total time | 275.88 min | 254.55 min | **−21.33 min** |
+| Active-assortment allocation | 200 / 200 | 200 / 200 | — |
+| Confirmed violations | 0 | 0 | — |
+| Unverified checks | 600 | 600 | — |
+
+Pipeline runtime: **≈ 92 s** · Recorded test run: **25 passing in ≈ 9 s**
+
+> [!CAUTION]
+> These are **simulation outputs, not measured warehouse performance.** Always quote numbers from your own latest run (`reports/final_validation_report.md`, `reports/optimization_report.md`), not older ones. Some report files committed in the repository come from earlier runs and may not match this table.
+
+### Generated plots
+
+| Demand concentration | Product volume | Affinity pairs |
+|:---:|:---:|:---:|
+| ![Demand Pareto](reports/demand_pareto.png) | ![Product volume distribution](reports/product_volume_distribution.png) | ![Affinity pairs](reports/affinity_pairs.png) |
+
+---
+
+## 🛡️ Interpreting results safely
+
+| Term | Meaning |
+|---|---|
+| **Active assortment coverage** | % of *selected* SKUs allocated, not coverage of the full catalog |
+| **Catalog-wide coverage** | Allocated rows ÷ full SKU profile; low when only a limited assortment is modeled |
+| **Whole-warehouse utilization** | Modeled SKU volume ÷ total generated warehouse capacity |
+| **Allocated-bin utilization** | Modeled SKU volume ÷ capacity of bins actually used |
+| **Confirmed violations** | Checks explicitly marked `VIOLATION` |
+| **Unverified checks** | Missing/unknown data. They are *not* violations, but also *not* proof of safety |
+| **Demand forecast** | Next-week recorded order-line counts from history, not a real-time inventory or replenishment system |
+| **Route distance/time** | Estimates from simplified synthetic geometry |
+| **Optimizer** | Heuristic, not a globally optimal solver |
+
+### Known limitations
+
+1. **Synthetic warehouse:** rack layout, dimensions, capacities, and coordinates are configuration-driven, not a surveyed facility.
+2. **Inventory is unknown:** Olist has no stock snapshot; representative-stock assumptions must be labeled.
+3. **Hazard and handling data are unknown:** never infer them from category names.
+4. **Demand proxy:** order-item lines are not a measured inventory quantity.
+5. **Heuristic optimization:** feasible under modeled constraints, no global-optimum guarantee.
+6. **Estimated travel:** simulated, not measured.
+7. **Utilization:** low modeled utilization may reflect the representative-stock assumption and assortment scope. Don't tune warehouse size or objectives just to improve the percentage.
+
+For operational use you would need a real warehouse map and capacity ratings, current stock counts, product hazard/handling metadata, and a validated walkable route graph, plus review by a qualified safety owner.
+
+---
+
+## 🗂️ Project structure
+
+```text
+SnakeCharmers/
+├── config/                   # simulation_config.json, warehouse_config.json
+├── src/                      # core logic
+│   ├── data_loader.py        #   load & normalize Olist tables
+│   ├── demand_analysis.py    #   demand profile, ABC classes
+│   ├── ml_demand.py          #   Ridge next-week forecast
+│   ├── affinity_analysis.py  #   SKU co-occurrence
+│   ├── warehouse_generator.py#   synthetic warehouse locations
+│   ├── baseline.py           #   deterministic baseline allocation
+│   ├── optimizer.py          #   greedy slotting + swap local search
+│   ├── feasibility.py        #   hard constraints & validation
+│   ├── routing.py            #   picking route simulation
+│   └── evaluation.py         #   baseline vs optimized metrics
+├── scripts/                  # download_olist, prepare_data, run_eda,
+│                             # run_pipeline, validate_saved_layouts
+├── tests/                    # pytest suite (engine, EDA, ML demand, optimizer)
+├── data/{raw,processed}/     # Olist inputs / generated CSVs
+├── reports/                  # audits, plots, validation reports
+├── dashboard.py              # Streamlit dashboard
+├── HANDOVER.md               # setup, checklist, known limitations
+└── requirements.txt
+```
+
+### Generated outputs
+
+| Location | Contents |
+|---|---|
+| `data/processed/` | Orders, SKU master, demand profile, allocations, routes, validation, `evaluation_comparison.csv` (typically Git-ignored) |
+| `reports/` | `data_foundation_audit.md`, `eda_report.md`, `ml_demand_report.md`, `optimization_report.md`, `unallocated_sku_diagnosis.md`, `final_validation_report.md`, `correctness_hardening_report.md`, plots, evidence CSVs |
+
+### 📊 Dashboard
+
+The Streamlit dashboard (`dashboard.py`) shows:
+
+- Baseline vs. optimized metrics table
+- Sample of the optimized SKU-to-location allocation
+- **Confirmed violations** and **unverified checks** as separate metrics, with a warning that unverified ≠ safe
+- Strongest SKU affinity pairs
+
+---
+
+## 🔭 Roadmap
+
+A stronger model should only replace Ridge after a **reproducible evaluation proves it is better**.
+
+- [ ] **Trustworthy baseline:** chronological rolling-origin backtests with MAE, RMSE, WAPE (explicit zero-denominator handling), overall and by segment/category; compare against naïve baselines (last week, moving average)
+- [ ] **Stronger tabular models:** benchmark HistGradientBoosting, LightGBM, or CatBoost against Ridge on identical splits/features
+- [ ] **Features only when justified:** calendar/seasonality, richer lags, reliable price/promo signals, product attributes, with **no future leakage**
+- [ ] **Optimizer upgrades:** benchmark simulated annealing or OR-Tools against the current heuristic; keep hard constraints separate from soft objectives and report runtime and quality
+- [ ] **Config cleanup:** wire or remove unused parameters; unify the heavy-SKU threshold between optimizer and validator
+- [ ] **Fair acceptance gate:** adopt a replacement only if time-based test performance and end-to-end slotting metrics improve consistently, runtime is acceptable, tests pass, and safety/inventory data gaps stay visible
+
+Document every future input by source field, transformation, missing-value treatment, and availability at prediction time. Don't add customer, review, payment, or geolocation fields just because they exist.
+
+---
+
+## ✅ Continuous integration
+
+GitHub Actions (`.github/workflows/tests.yml`) runs `pytest -q` on Python 3.15 for every push and pull request.
+
+## 🤝 Contributing & handover
+
+1. Branch from `Magnus`, keep changes small and tested.
+2. Run `pytest -q` and the pipeline before opening a PR.
+3. Don't commit raw data, generated outputs, or Kaggle credentials.
+4. Copy any quoted result from your latest local run.
+
+See **[HANDOVER.md](HANDOVER.md)** for the acceptance checklist, metric definitions, and transfer notes.
+
+<div align="center">
+
+<sub>Built as a simulation research prototype. Have a qualified owner review safety requirements before any operational use.</sub>
+
+</div>
