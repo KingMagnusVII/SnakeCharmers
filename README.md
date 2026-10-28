@@ -46,33 +46,70 @@ SnakeCharmers is a **reproducible research prototype** that uses historical Olis
 | **Routing** | Nearest-next-SKU, Manhattan distance |
 | **Warehouse** | Synthetic: 6 aisles × 2 rack sides × 5 bays × 4 shelf levels, plus 4 oversized slots |
 | **Active assortment** | Configured assortment cap; actual selected count depends on allocation and feasibility |
-| **Interface** | Streamlit dashboard + CSV/Markdown reports |
+| **Interface** | React + TypeScript + Vite dashboard (local Python API); legacy Streamlit dashboard and CSV/Markdown reports also remain |
 
 ---
 
 ## 🚀 Quick start
 
-> Windows PowerShell, run from the repository root.
+> Windows PowerShell. The active interactive dashboard is the **React + TypeScript + Vite frontend** backed by a small local Python API. Run commands from the repository root, `C:\\Magnus\\Code\\SnakeCharmers`. Keep the API and frontend running in separate terminals.
+
+### Every time you want to use the dashboard
+
+**Terminal 1 — Python API**
 
 ```powershell
-git checkout main
-git pull origin main
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m pytest -q
-.venv\Scripts\python.exe -m scripts.run_pipeline
-.venv\Scripts\python.exe scripts\validate_saved_layouts.py
-.venv\Scripts\python.exe -m streamlit run dashboard.py
+cd C:\\Magnus\\Code\\SnakeCharmers
+.venv\\Scripts\\python.exe scripts\\api_server.py
 ```
 
-Streamlit prints a local URL; open it in a browser and stop the server with `Ctrl+C`.
+The API listens at `http://127.0.0.1:8000`. Leave this terminal open.
+
+**Terminal 2 — React/Vite frontend**
+
+```powershell
+cd C:\\Magnus\\Code\\SnakeCharmers
+& "C:\\Program Files\\nodejs\\npm.cmd" run dev
+```
+
+Open the local URL Vite prints (normally `http://localhost:5173`). The explicit npm path works even when the VS Code terminal has not picked up the Node.js PATH entry. If `npm` works normally in your terminal, `npm run dev` is also fine.
+
+> [!NOTE]
+> Starting the API does **not** regenerate the processed CSVs. The API loads and caches the CSV files from `data/processed/` when it starts. If you regenerate data, stop and restart the API so it reloads those files.
+
+### First-time setup (or after dependencies change)
+
+```powershell
+cd C:\\Magnus\\Code\\SnakeCharmers
+.venv\\Scripts\\python.exe -m pip install -r requirements.txt
+& "C:\\Program Files\\nodejs\\npm.cmd" install
+```
+
+### Regenerate warehouse/pipeline outputs (only when needed)
+
+Run this from the repository root when you need fresh allocations, route simulations, or evaluation CSVs:
+
+```powershell
+.venv\\Scripts\\python.exe -m scripts.run_pipeline
+```
+
+Then restart the API (Terminal 1) to reload the new CSVs. The pipeline has previously had a scope issue in the refinement stage on the `Magnus` branch; if it fails, save the full traceback and fix that before relying on newly generated outputs. Do not treat old processed CSVs as fresh results.
+
+### Build check (optional)
+
+```powershell
+& "C:\\Program Files\\nodejs\\npm.cmd" run build
+```
+
+This runs the TypeScript check and creates the production frontend build in `dist/`. For local development, use `run dev` as shown above.
 
 <details>
-<summary><b>Setting up from scratch</b></summary>
+<summary><b>Setting up the Python environment from scratch</b></summary>
 
 ```powershell
 py -m venv .venv
-.venv\Scripts\python.exe -m pip install --upgrade pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\\Scripts\\python.exe -m pip install --upgrade pip
+.venv\\Scripts\\python.exe -m pip install -r requirements.txt
 ```
 
 </details>
@@ -81,16 +118,17 @@ py -m venv .venv
 
 | Goal | Command |
 |---|---|
-| Download raw Olist data | `python -m scripts.download_olist` |
-| Normalize raw data | `python -m scripts.prepare_data` |
-| Exploratory analysis | `python -m scripts.run_eda` |
-| Run the full pipeline | `python -m scripts.run_pipeline` |
-| Re-validate saved layouts (no regeneration) | `python scripts/validate_saved_layouts.py` |
-| Run tests | `python -m pytest -q` |
-| Launch dashboard | `python -m streamlit run dashboard.py` |
+| Start Python API | `.venv\\Scripts\\python.exe scripts\\api_server.py` |
+| Start React/Vite frontend | `& "C:\\Program Files\\nodejs\\npm.cmd" run dev` |
+| Build/check frontend | `& "C:\\Program Files\\nodejs\\npm.cmd" run build` |
+| Install frontend packages | `& "C:\\Program Files\\nodejs\\npm.cmd" install` |
+| Run full data pipeline | `.venv\\Scripts\\python.exe -m scripts.run_pipeline` |
+| Re-validate saved layouts | `.venv\\Scripts\\python.exe scripts\\validate_saved_layouts.py` |
+| Run tests | `.venv\\Scripts\\python.exe -m pytest -q` |
+| Launch legacy Streamlit dashboard | `.venv\\Scripts\\python.exe -m streamlit run dashboard.py` |
 
-> [!TIP]
-> The dashboard reads generated files from `data/processed/`. The current `Magnus` dashboard still needs runtime fixes noted below; rerunning the pipeline alone may not resolve dashboard errors.
+> [!IMPORTANT]
+> The React dashboard and the legacy Streamlit dashboard are different interfaces. For the current interactive UI, start both the **Python API** and **React/Vite frontend** using the two-terminal instructions above.
 
 ---
 
@@ -396,9 +434,13 @@ SnakeCharmers/
 | `data/processed/` | Orders, SKU master, demand profile, allocations, routes, validation, `evaluation_comparison.csv` (typically Git-ignored) |
 | `reports/` | `data_foundation_audit.md`, `eda_report.md`, `ml_demand_report.md`, `optimization_report.md`, `unallocated_sku_diagnosis.md`, `final_validation_report.md`, `correctness_hardening_report.md`, plots, evidence CSVs |
 
-### 📊 Dashboard
+### 📊 Dashboards
 
-The Streamlit dashboard (`dashboard.py`) is intended to show generated evaluation results, allocation samples, validation status, and affinity information. The current `Magnus` version is **not yet verified at runtime**: it references an undefined `comparison` variable and uses a DataFrame in a boolean expression. Fix these issues and test it against freshly generated outputs before relying on the dashboard.
+The current interactive dashboard is the **React + TypeScript + Vite** app in `src/`. It calls `scripts/api_server.py` at `http://127.0.0.1:8000`, which serves processed CSV data from `data/processed/` through `/api/health`, `/api/overview`, `/api/inventory`, `/api/warehouse/nodes`, `/api/routes`, `/api/validation`, and `/api/downloads`. The frontend includes Overview, Analytics, Pick Routes, and validation/data views, including search and CSV export. The Analytics page contains demand/allocation charts, route-distance comparisons, and a metric inspector. Empty route/evaluation data is shown explicitly rather than presented as a valid zero result. The sidebar reports whether the UI is using live API data or fallback/demo data.
+
+The API caches processed CSVs for its lifetime. Restart it after running the pipeline. If the route graph says `NO ROUTE DATA LOADED`, check that `data/processed/optimized_routes.csv` exists and has rows, then inspect the pipeline output and restart the API. Inventory/warehouse data may load while route output is still absent.
+
+The separate legacy Streamlit dashboard (`dashboard.py`) remains in the repository. Do not confuse it with the React/Vite UI used by the quick-start commands. Neither dashboard nor simulation output should be treated as production warehouse guidance.
 
 ---
 
