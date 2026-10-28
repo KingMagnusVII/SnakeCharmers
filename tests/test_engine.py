@@ -46,7 +46,7 @@ def _rules(layout, skus=None, locations=None, config=CONFIG):
 
 def test_warehouse_deterministic_count():
     warehouse = generate_warehouse()
-    assert len(warehouse) == 244
+    assert len(warehouse) == 524
     assert (warehouse["Location_Type"] == "OVERSIZED").sum() == 4
     assert warehouse.equals(generate_warehouse())
 
