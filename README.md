@@ -48,6 +48,28 @@ SnakeCharmers is a **reproducible research prototype** that uses historical Olis
 | **Active assortment** | Configured assortment cap; actual selected count depends on allocation and feasibility |
 | **Interface** | React + TypeScript + Vite dashboard (local Python API); legacy Streamlit dashboard and CSV/Markdown reports also remain |
 
+### Technology stack
+
+| Technology | Where it is used |
+|---|---|
+| **Python** | Data preparation, demand analysis, Ridge forecasting, warehouse generation, slotting optimization, route simulation, validation, and the local HTTP API |
+| **pandas / NumPy / scikit-learn** | Tabular data processing, numerical work, and Ridge demand forecasting |
+| **SciPy** | Experimental mixed-integer linear programming (MILP) assortment selector; separate from the default pipeline |
+| **React** | Component-based interactive dashboard UI |
+| **TypeScript** | Typed frontend components, application state, and data interfaces |
+| **Node.js + npm** | JavaScript runtime and package/dependency scripts used for frontend development and builds |
+| **Vite** | Frontend development server and production bundler |
+| **Three.js** | 3D warehouse visualization |
+| **Plotly.js / react-plotly.js** | Interactive plotting dependencies in the frontend |
+| **Lucide React** | Dashboard icons |
+| **Python standard library HTTP server** | Local API at `http://127.0.0.1:8000`; serves the generated CSV data to the React app |
+| **Streamlit** | Legacy alternative dashboard in `dashboard.py`; not the main React/Vite interface described in Quick start |
+| **GitHub Actions** | Automated Python test workflow |
+
+**Frontend flow:** Browser → React + TypeScript UI (served by Vite during development) → local Python API → generated CSVs in `data/processed/`.
+
+**Data pipeline flow:** Olist CSV inputs → Python data preparation and demand forecasting → synthetic warehouse allocation and route simulation → processed CSVs and reports → API → dashboard.
+
 ---
 
 ## 🚀 Quick start
