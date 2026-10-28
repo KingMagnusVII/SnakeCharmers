@@ -18,7 +18,7 @@ const titles:Record<ModuleKey,{title:string;caption:string;tag:string}>={
  roi:{title:"ADVANCED ROI ANALYSIS",caption:"COST MODEL // RETURN ESTIMATES",tag:"MODULE 11"}
 };
 
-function csvDownload(name:string,rows:Record<string,string|number>[]){const cols=Object.keys(rows[0]??{});const csv=[cols.join(","),...rows.map(r=>cols.map(c=>JSON.stringify(r[c]??"")).join(","))].join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=name;a.click();URL.revokeObjectURL(a.href)}
+function csvDownload<T extends object>(name:string,rows:T[]){const records=rows as Record<string,unknown>[];const cols=Object.keys(records[0]??{});const csv=[cols.join(","),...records.map(r=>cols.map(c=>JSON.stringify(r[c]??"")).join(","))].join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=name;a.click();URL.revokeObjectURL(a.href)}
 
 function OutOfStock(){
  const [q,setQ]=useState("");
