@@ -82,13 +82,20 @@ def select_order_coverage_candidates(
         metadata[sku]["SKU_ID"] = sku
     rows = []
     while remaining and len(rows) < max_skus:
-        def score(sku: str) -> tuple[int, int, int, int]:
+        def score(sku: str) -> tuple[float, int, int, int]:
             order_indexes = candidate_orders[sku]
-            completed = sum(order_remaining[index] == 1 for index in order_indexes)
+            # Greedily maximize marginal order coverage. A SKU receives a
+            # larger share of credit as the remaining SKUs in an order are
+            # selected, so multi-SKU orders can be completed by later picks.
+            coverage_gain = sum(
+                1.0 / order_remaining[index]
+                for index in order_indexes
+                if order_remaining[index] > 0
+            )
             potential = len(order_indexes)
             row = metadata[sku]
             return (
-                completed,
+                coverage_gain,
                 potential,
                 int(row.get("Distinct_Orders", 0)),
                 int(row.get("Recorded_Order_Lines", 0)),
