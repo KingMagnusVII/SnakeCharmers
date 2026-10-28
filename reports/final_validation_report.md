@@ -1,21 +1,23 @@
 # Final validation report
 
 ```text
-                     Metric     Baseline    Optimized    Change
-  allocated_bin_utilization     0.152024     0.152024    0.0000
-        allocation_coverage     0.004656     0.004656    0.0000
-         average_distance_m    23.072800    22.811200   -0.2616
-            complete_orders   494.000000   494.000000    0.0000
-         estimated_time_min   253.818667   252.074667   -1.7440
-        order_line_coverage     0.136274     0.136274    0.0000
-           orders_simulated   500.000000   500.000000    0.0000
-           total_distance_m 11536.400000 11405.600000 -130.8000
-  unknown_hazard_attributes   150.000000   150.000000    0.0000
-whole_warehouse_utilization     0.095015     0.095015    0.0000
+                              Metric    Baseline   Optimized  Change
+           allocated_bin_utilization    0.142329    0.142329     0.0
+                 allocation_coverage    0.006070    0.006070     0.0
+  average_distance_complete_orders_m   24.350685   24.350685     0.0
+average_distance_incomplete_orders_m    0.090867    0.090867     0.0
+                  average_distance_m    3.632800    3.632800     0.0
+                     complete_orders   73.000000   73.000000     0.0
+          completed_route_distance_m 1777.600000 1777.600000     0.0
+                     completion_rate    0.146000    0.146000     0.0
+                  estimated_time_min  124.218667  124.218667     0.0
+                   incomplete_orders  427.000000  427.000000     0.0
+         incomplete_route_distance_m   38.800000   38.800000     0.0
+                 order_line_coverage    0.154832    0.154832     0.0
+                    orders_simulated  500.000000  500.000000     0.0
+                    total_distance_m 1816.400000 1816.400000     0.0
+           unknown_hazard_attributes  200.000000  200.000000     0.0
+         whole_warehouse_utilization    0.118607    0.118607     0.0
 ```
 
-Runtime seconds: 7.39
-
-## Correctness-hardening qualification
-
-The saved baseline and optimized allocations were independently revalidated without regenerating the pipeline. Each has 150 assignments, zero known hard-constraint violations, and zero unknown SKU/location references under the configured representative-stock and ergonomic assumptions. This is not a safety-compliance certification: all 150 assignments have unavailable observed inventory and `UNSPECIFIED` hazard and handling attributes, producing 450 unverified checks per layout. See `correctness_hardening_report.md` and its detailed validation CSVs.
+Runtime seconds: 83.12

@@ -1,6 +1,6 @@
 {
   "description": "Synthetic topology for a prototype; replace with measured warehouse data when available.",
-  "aisles": 6,
+  "aisles": 13,
   "rack_sides_per_aisle": ["L", "R"],
   "bays_per_rack": 5,
   "shelf_levels_per_rack": 4,
@@ -21,43 +21,43 @@
     {
       "location_id": "OVR-AUTO-01",
       "rack_id": "OVR-RACK-01",
-      "dimensions_cm": {"width": 70.0, "height": 20.0, "depth": 70.0},
+      "dimensions_cm": {"width": 130.0, "height": 100.0, "depth": 80.0},
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 2.0
     },
     {
       "location_id": "OVR-AUTO-02",
       "rack_id": "OVR-RACK-02",
-      "dimensions_cm": {"width": 70.0, "height": 20.0, "depth": 70.0},
+      "dimensions_cm": {"width": 130.0, "height": 100.0, "depth": 60.0},
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 3.2
     },
     {
       "location_id": "OVR-AUTO-03",
       "rack_id": "OVR-RACK-03",
-      "dimensions_cm": {"width": 70.0, "height": 20.0, "depth": 70.0},
+      "dimensions_cm": {"width": 130.0, "height": 80.0, "depth": 60.0},
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 4.4
     },
     {
       "location_id": "OVR-LONG-01",
       "rack_id": "OVR-RACK-04",
-      "dimensions_cm": {"width": 110.0, "height": 20.0, "depth": 20.0},
+      "dimensions_cm": {"width": 130.0, "height": 80.0, "depth": 20.0},
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 5.6
     }
   ],
-  "zone_aisle_ranges": {"A": [1, 2], "B": [3, 4], "C": [5, 6]}
+  "zone_aisle_ranges": {"A": [1, 4], "B": [5, 9], "C": [10, 13]}
 }

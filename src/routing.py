@@ -4,8 +4,14 @@ from __future__ import annotations  # Enables modern type annotations.
 import pandas as pd  # Provides DataFrame operations.
 
 
-def route_orders(orders, layout, locations, max_orders=500):
-    """Build deterministic nearest-next-SKU routes using Manhattan distance."""
+def route_orders(orders, layout, locations, max_orders=500, include_zero_pick_orders=True):
+    """Build deterministic nearest-next-SKU routes using Manhattan distance.
+
+    By default, count the first ``max_orders`` source orders, recording
+    zero-pick orders as incomplete. Set ``include_zero_pick_orders=False``
+    for the historical metric, which skips zero-pick orders and continues
+    until it collects up to ``max_orders`` pickable orders.
+    """
 
     # Join each assigned SKU to its warehouse coordinates and index by SKU.
     loc = (
@@ -20,13 +26,13 @@ def route_orders(orders, layout, locations, max_orders=500):
     # Store one route record per simulated order.
     records = []
 
-    # Process orders in deterministic Order_ID order.
-    for order_number, (order_id, group) in enumerate(
-        orders.groupby("Order_ID", sort=True)
-    ):
-        # Count every source order toward the sample limit, including orders
-        # whose SKUs are all unallocated.
-        if order_number >= max_orders:
+    # In source-coverage mode, the limit applies to source orders. In legacy
+    # mode, it applies only to orders with at least one pickable SKU.
+    for order_id, group in orders.groupby("Order_ID", sort=True):
+        if include_zero_pick_orders:
+            if len(records) >= max_orders:
+                break
+        elif len(records) >= max_orders:
             break
 
         # Deduplicate repeated SKU lines within the same order.
@@ -35,14 +41,15 @@ def route_orders(orders, layout, locations, max_orders=500):
         # Keep only SKUs that exist in the proposed layout.
         present = [sku for sku in skus if sku in loc.index]
         if not present:
-            records.append(
-                {
-                    "Order_ID": order_id,
-                    "Visited_SKUs": "",
-                    "Distance_m": 0.0,
-                    "Complete": False,
-                }
-            )
+            if include_zero_pick_orders:
+                records.append(
+                    {
+                        "Order_ID": order_id,
+                        "Visited_SKUs": "",
+                        "Distance_m": 0.0,
+                        "Complete": False,
+                    }
+                )
             continue
 
         # Start at the dispatch depot origin.

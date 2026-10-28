@@ -40,14 +40,17 @@ SKU/location references; assignment and location uniqueness; dimension orientati
 
 ## Test execution
 
-The complete suite was run after Python compilation checks:
+The complete suite was recorded as passing after Python compilation checks:
 
 ```text
 11 passed in 1.39s
 ```
 
-No tests failed or were skipped. They use synthetic fixtures only; no Kaggle access, source-data download, or full pipeline execution was required.
-
+This is the historical test result recorded for the hardening work; it is not a claim about the latest test run. Tests use synthetic fixtures only; no Kaggle access, source-data download, or full pipeline execution was required.
 ## Remaining limitations
 
-Aggregate-load checks model one configured representative unit because observed inventory is unavailable. All saved-layout hazard and handling checks remain unverified because Olist provides `UNSPECIFIED` values. This work does not validate routing realism, affinity use in optimization, EDA breadth, or the dashboard.
+- Aggregate-load checks model one configured representative unit because observed inventory is unavailable.
+- Hazard and handling checks remain unverified because the source dataset contains `UNSPECIFIED` values.
+- Warehouse geometry and bin dimensions are synthetic rather than measured.
+- Route distance is an estimate based on the prototype's routing model, not validated real-world travel distance.
+- Passing automated tests and reporting zero known violations do not constitute real-world warehouse safety certification.

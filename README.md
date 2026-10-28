@@ -61,52 +61,6 @@ The following original files are **not currently read by the pipeline**: `olist_
 - The configured `representative_inventory_units = 1` is a **simulation fallback**, not an observed quantity. Validation still marks the corresponding inventory checks as `UNVERIFIED`.
 - Do not infer hazard class, safe handling, or storage compatibility from a product category name.
 
-## Resolving inventory and safety-data gaps
-
-The Olist dataset is historical sales data, not a warehouse management system. It cannot tell us current on-hand stock, verified hazard classifications, handling requirements, or whether a real rack/floor is rated for the modeled load. The pipeline therefore leaves those attributes unknown instead of inventing them. The default one-unit representative-stock value is for simulation only.
-
-### Add reviewed operational SKU data
-
-1. Create the ignored input directory and copy the blank template (the template contains only a header row):
-
-```powershell
-New-Item -ItemType Directory -Force data\\input | Out-Null
-Copy-Item templates\\sku_operational_metadata_template.csv data\\input\\sku_operational_metadata.csv
-```
-
-The data/input/ directory is intentionally git-ignored because it may contain sensitive inventory and safety information.
-2. Add one row per SKU you can verify. SKU_ID must exactly match the Olist product ID in sku_master.csv. Leave fields blank when you do not have trustworthy data; do not guess.
-3. For a supplied Inventory_Units, enter the current whole-number on-hand quantity (zero is valid), the snapshot timestamp in Inventory_Snapshot_At, and the system/report used in Inventory_Data_Source.
-4. For supplied Hazard_Class or Handling_Type, enter the classification approved for that product and complete Safety_Verified_By, Safety_Verified_At, and Safety_Data_Source. Use values such as NONE or NORMAL only when the responsible source explicitly confirms them. UNKNOWN and UNSPECIFIED are not accepted as reviewed values.
-5. Re-run data preparation and the pipeline so the overlay is merged into the generated SKU master:
-
-```powershell
-.venv\Scripts\python.exe -m scripts.prepare_data
-.venv\Scripts\python.exe -m scripts.run_pipeline
-.venv\Scripts\python.exe scripts\validate_saved_layouts.py
-```
-
-The data-foundation audit records whether the overlay was found and how many inventory and safety records were applied. Invalid quantities, duplicate IDs, unknown SKUs, missing provenance, and invalid dates stop preparation with an actionable error.
-
-### Require complete metadata before operational review
-
-```powershell
-.venv\Scripts\python.exe scripts\validate_saved_layouts.py --strict-operational-data
-```
-
-The strict check exits with code 2 when any allocated SKU is missing a non-negative inventory count, non-placeholder hazard/handling classifications, or the required provenance fields. A successful check means the SKU metadata is complete enough for the next review step; **it is not a safety certification and does not prove the warehouse geometry, rack ratings, compatibility policy, fire controls, aisle clearances, or ergonomics are safe**. Those must be verified against the actual facility and reviewed by the responsible warehouse/safety owner.
-
-The ordinary validator remains available for simulation runs and continues to report missing data as UNVERIFIED. Do not change representative_inventory_units to make missing stock appear known.
-
-### Remaining real-world requirements
-
-- **Inventory:** connect a WMS/ERP snapshot with a timestamp, unit of measure, SKU identity, and a documented reconciliation process. Historical demand is not inventory. Confirm whether the modeled quantity means eaches, cases, pallets, or another handling unit before using capacity calculations.
-- **Product safety:** use an approved product master/SDS or internal safety register for hazard class, handling method, storage restrictions, and any incompatibilities. A product category is not evidence of chemical compatibility.
-- **Facility constraints:** replace synthetic coordinates, bin sizes, and load limits with measured locations and verified rack/shelf/floor ratings. Add real aisle/exit clearances, access restrictions, and site-approved storage rules.
-- **Operational sign-off:** have the warehouse owner validate the inputs and rules before any generated allocation is used to store or move physical goods.
-
-These controls align with general warehouse-storage principles such as respecting rated loads, segregating incompatible materials, maintaining clear aisles, and preventing unstable storage; applicability and detailed requirements depend on the actual jurisdiction and facility. See [OSHA warehouse hazards and solutions](https://www.osha.gov/warehousing/hazards-solutions) and [OSHA general storage requirements](https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.250).
-
 ## Current AI / optimization pipeline
 
 There are two distinct components: (1) a supervised **Ridge regression demand forecast**, and (2) a rule/heuristic-based **slotting optimizer**. The second component is not itself a trained AI model.
@@ -162,8 +116,11 @@ The main run configuration is `config/simulation_config.json`.
 | Parameter | Current value | What it controls / status |
 |---|---|---|
 | `demand_statuses` | `["delivered"]` | Which order lines enter demand analysis, forecasting, affinity, and route simulation. |
-| `max_active_skus` | `200` | Maximum assortment size selected for allocation/evaluation. |
+| `max_active_skus` | `500` | Maximum assortment size selected for allocation/evaluation. |
 | `representative_inventory_units` | `1` | Fallback used when observed inventory is absent; simulation assumption only. |
+| `inventory_simulation.coverage_days` | `14` | Starting-stock coverage estimated from earlier training orders only; simulated units, not actual inventory. |
+| `inventory_simulation.train_fraction` | `0.8` | Fraction of unique order timestamps assigned to the chronological training period. |
+| `inventory_simulation.max_test_orders` | `0` | `0` evaluates all later test orders; a positive value limits evaluation to the earliest later orders. |
 | `allow_rotations` | `true` | Allows dimension permutations when checking physical fit. |
 | `ergonomics.heavy_sku_weight_kg` | `10.0` | Configured weight threshold used by feasibility validation. |
 | `ergonomics.max_shelf_level_for_heavy_skus` | `2` | Configured maximum shelf level for heavy SKUs in validation. |
@@ -183,7 +140,7 @@ The main run configuration is `config/simulation_config.json`.
 
 The current routing simulation also has `max_orders=500` as a default argument in `src/routing.py`. The current Ridge implementation uses fixed settings in code (`alpha=1.0`, median imputation, standard scaling, most-frequent category imputation, one-hot encoding, and a minimum of 20 training rows); these are not currently exposed as JSON configuration parameters.
 
-Warehouse geometry is configured separately in `config/warehouse_config.json`: 6 aisles; two rack sides per aisle; 5 bays per rack; 4 shelf levels; aisle spacing 3.0 m; bay spacing 1.2 m; first aisle X = 3.0 m; first bay Y = 2.0 m; default bin dimensions 40 × 30 × 40 cm; levels 1 and 2 use 100 × 60 × 60 cm bins; level weight capacities 40/35/30/20 kg; shelf limit 200 kg; rack limit 700 kg; and four dedicated oversized slots with their own configured dimensions, capacities, and coordinates. These are synthetic assumptions and must be replaced with measured site data for a real warehouse.
+Warehouse geometry is configured separately in `config/warehouse_config.json`: 13 aisles; two rack sides per aisle; 5 bays per rack; 4 shelf levels (520 standard locations plus 4 oversized locations, 524 total); aisle spacing 3.0 m; bay spacing 1.2 m; first aisle X = 3.0 m; first bay Y = 2.0 m; default bin dimensions 40 × 30 × 40 cm; levels 1 and 2 use 100 × 60 × 60 cm bins; level weight capacities 40/35/30/20 kg; shelf limit 200 kg; rack limit 700 kg; and four dedicated oversized slots with their own configured dimensions, capacities, and coordinates. These are synthetic assumptions and must be replaced with measured site data for a real warehouse.
 
 ## Future AI upgrade plan
 
@@ -196,6 +153,17 @@ A more powerful model should be introduced only after a reproducible evaluation 
 5. **Use a fair acceptance gate:** preserve the current Ridge + greedy version as a baseline. Adopt a replacement only when time-based test performance and end-to-end slotting metrics improve consistently, runtime is acceptable, tests pass, and safety/inventory data quality is not hidden by the model.
 
 Potential future model inputs should be documented by exact source field, transformation, missing-value treatment, and whether each feature is available at prediction time. Do not include customer/review/payment/geolocation fields just because they exist in Kaggle; first show that they improve a defined warehouse demand or routing objective without leakage.
+
+## Chronological inventory holdout experiment
+
+The pipeline also writes a separate, time-ordered inventory-and-picking experiment under `reports/inventory_holdout_experiment.md` and CSVs under `data/processed/inventory_holdout_*`.
+
+- Orders are split chronologically: the first 80% of distinct timestamps form the training period, and later timestamps form the test period. No test-period demand is used to estimate starting stock, select the assortment, calculate co-order affinity, train the demand forecast, or refine slotting.
+- Per-SKU starting stock is estimated as `ceil(training-period recorded order-item lines per day × 14 days)`. Because Olist has no explicit item-quantity or on-hand-inventory field, each recorded item line is a one-unit demand proxy. These are **simulated starting inventory quantities, not actual Kaggle inventory**.
+- The active assortment and baseline/optimized layouts are built from training-period demand. Both layouts must contain the same SKU assortment and are replayed against the exact same later test orders and starting-stock estimates.
+- Orders are replayed chronologically. An order is fulfilled only if all requested SKUs are allocated and enough simulated stock remains; only fulfilled orders deplete stock. Unallocated SKU demand is reported separately from stockouts. Routes are calculated for fulfilled orders, and the per-SKU ledger records starting stock, depletion, remaining stock, and stockout events/units.
+- By default, all later test orders are evaluated (`max_test_orders: 0`). Set a positive limit to evaluate only the earliest later orders. Configuration lives in `config/simulation_config.json` under `inventory_simulation`.
+- This experiment evaluates a stock-aware simulation and estimated walking routes, not verified real-world stock, measured walking distance, or globally optimal picking.
 
 ## Pipeline stages
 

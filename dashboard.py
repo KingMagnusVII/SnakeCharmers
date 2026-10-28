@@ -83,93 +83,44 @@ if metrics is None:
     st.error("evaluation_comparison.csv is missing. Run: python scripts/run_pipeline.py")
     st.stop()
 
-st.sidebar.markdown("## 📟 TERMINAL ACCESS")
-page=st.sidebar.radio("SYSTEM MODULES",["Overview","Warehouse","Slotting","SKU Finder","What-If","Routes","Analytics","Validation","Downloads","ROI"])
-st.markdown(f"<div class='hero'><h1>WAREHOUSE OPTIMIZATION TERMINAL</h1><p>HEURISTIC SLOTTING // PATHFINDING // CAPACITY SIMULATION</p></div>",unsafe_allow_html=True)
+# Load and display baseline-versus-optimized metrics.
+metrics = pd.read_csv(comparison)
+st.caption(
+    "Synthetic warehouse geometry and representative-stock assumptions are "
+    "simulation inputs, not measured safety data."
+)
+st.subheader("Baseline versus optimized")
+st.dataframe(metrics, use_container_width=True)
 
-if page=="Overview":
-    st.markdown("### MODULE 01 // SYSTEM OVERVIEW")
-    b=metric(metrics,"total_distance_m","Baseline"); o=metric(metrics,"total_distance_m")
-    c=metric(metrics,"allocation_coverage"); u=metric(metrics,"whole_warehouse_utilization"); bu=metric(metrics,"allocated_bin_utilization")
-    with st.expander("COMPARATIVE ANALYSIS // BASELINE VS OPTIMIZED"):
-        a,z=st.columns(2); a.metric("BASELINE TOTAL DISTANCE",f"{b:,.2f} m" if b is not None else "N/A"); z.metric("OPTIMIZED TOTAL DISTANCE",f"{o:,.2f} m" if o is not None else "N/A",delta=f"{o-b:+,.2f} m" if b is not None and o is not None else None,delta_color="inverse")
-    cs=st.columns(5); cs[0].metric("ORDERS",f"{metric(metrics,'orders_simulated') or 0:,.0f}"); cs[1].metric("COMPLETE",f"{metric(metrics,'complete_orders') or 0:,.0f}"); cs[2].metric("ALLOCATED SKUS",f"{len(optimized) if optimized is not None else 0:,}"); cs[3].metric("COVERAGE",f"{c*100:.2f}%" if c is not None else "N/A"); cs[4].metric("BIN UTIL",f"{bu*100:.2f}%" if bu is not None else "N/A")
-    st.metric("WHOLE-WAREHOUSE UTILIZATION",f"{u*100:.2f}%" if u is not None else "N/A"); table(metrics)
+# Split the next section into two dashboard columns.
+left, right = st.columns(2)
 
-elif page=="Warehouse":
-    st.markdown("### MODULE 02 // SPATIAL DIGITAL TWIN")
-    if locations is None: st.error("warehouse_locations.csv missing"); st.stop()
-    d=locations.copy()
-    if optimized is not None: d=d.merge(optimized[["Location_ID","SKU_ID","Demand_Class"]].drop_duplicates("Location_ID"),on="Location_ID",how="left")
-    d["Status"]=d.SKU_ID.notna().map({True:"ALLOCATED",False:"VACANT"})
-    status=st.multiselect("NODE STATUS",["ALLOCATED","VACANT"],default=["ALLOCATED","VACANT"]); d=d[d.Status.isin(status)]
-    fig=px.scatter_3d(d,x="X_m",y="Y_m",z="Z_m",color="Status",hover_name="Location_ID",template="plotly_dark"); fig.update_layout(height=650); st.plotly_chart(fig,use_container_width=True); table(d)
+with left:
+    # Show a sample of the optimized SKU-to-location allocation.
+    st.subheader("Optimized allocation")
+    st.dataframe(
+        pd.read_csv(DATA / "optimized_allocation.csv").head(100),
+        use_container_width=True,
+    )
 
-elif page=="Slotting":
-    st.markdown("### MODULE 03 // INVENTORY MATRIX")
-    q=st.text_input("SEARCH SKU / LOCATION / RATIONALE"); d=optimized.copy() if optimized is not None else None
-    if d is not None and q: d=d[d.astype(str).apply(lambda x:x.str.contains(q,case=False,na=False,regex=False)).any(axis=1)]
-    table(d)
+with right:
+    # Separate confirmed violations from checks that remain unverified.
+    st.subheader("Validation")
+    validation = pd.read_csv(DATA / "optimized_violations.csv")
+    confirmed = int((validation["Status"] == "VIOLATION").sum()) if "Status" in validation else 0
+    unverified = int((validation["Status"] == "UNVERIFIED").sum()) if "Status" in validation else 0
+    st.metric("Confirmed violations", confirmed)
+    st.metric("Unverified checks", unverified)
+    if unverified:
+        st.warning(
+            "Unverified checks are not proof of compliance. Product hazard, "
+            "handling, or stock data may be missing; review the saved validation "
+            "reports before treating this layout as operationally safe."
+        )
 
-elif page=="SKU Finder":
-    st.markdown("### MODULE 04 // SKU PLACEMENT INSPECTOR")
-    q=st.text_input("SKU HASH"); d=optimized.copy() if optimized is not None else None
-    if d is not None and q: d=d[d.SKU_ID.astype(str).str.contains(q,case=False,na=False)]
-    table(d)
-
-elif page=="What-If":
-    st.markdown("### MODULE 05 // CAPACITY SIMULATOR")
-    current=(len(optimized) if optimized is not None else 0)+(len(unallocated) if unallocated is not None else 0); nodes=len(locations) if locations is not None else 0
-    growth=st.slider("DEMAND INFLATION (%)",-20,100,20,5); usable=st.slider("USABLE NODES (%)",50,100,90,5)
-    need=round(current*(1+growth/100)); cap=round(nodes*usable/100); alloc=min(need,cap); overflow=max(0,need-cap)
-    x=st.columns(4); x[0].metric("PROJECTED SKUS",f"{need:,}"); x[1].metric("USABLE NODES",f"{cap:,}"); x[2].metric("EST ALLOCATED",f"{alloc:,}"); x[3].metric("EST OVERFLOW",f"{overflow:,}"); st.progress(alloc/need if need else 1)
-
-elif page=="Routes":
-    st.markdown("### MODULE 06 // ROUTING TELEMETRY")
-    if routes is None or routes.empty: st.warning("Route data missing")
-    else:
-        oid=st.selectbox("ORDER",routes.Order_ID.astype(str)); r=routes[routes.Order_ID.astype(str)==oid].iloc[0]; st.metric("OPTIMIZED DISTANCE",f"{r.Distance_m:.2f} m");
-        if base_routes is not None:
-            q=base_routes[base_routes.Order_ID.astype(str)==oid]
-            if not q.empty: st.metric("BASELINE DISTANCE",f"{float(q.iloc[0].Distance_m):.2f} m")
-        st.write(r.to_dict())
-
-elif page=="Analytics":
-    st.markdown("### MODULE 07 // DISTRIBUTION ANALYTICS")
-    a,b,c=st.tabs(["AFFINITY PAIRS","DEMAND MATRIX","DIMENSIONAL FIT"])
-    with a: table(affinity)
-    with b: table(demand)
-    with c:
-        st.caption("Dimensional fit = whether the assigned SKU physically fits its assigned bin in at least one permitted orientation.")
-        if dimensional is None: st.warning("No dimensional-fit data available. Run the pipeline after this dashboard update.")
-        else:
-            fits=int(dimensional.Fits_Assigned_Bin.sum()); total=len(dimensional); x=st.columns(3); x[0].metric("ASSIGNMENTS CHECKED",total); x[1].metric("PHYSICAL FITS",fits); x[2].metric("FIT RATE",f"{fits/total*100:.2f}%" if total else "N/A"); table(dimensional)
-
-elif page=="Validation":
-    st.markdown("### MODULE 08 // CONSTRAINT VALIDATION")
-    st.caption("Confirmed violations and UNVERIFIED checks are shown separately. UNVERIFIED is not evidence of compliance.")
-    def vc(df):
-        if df is None or df.empty:return 0,0
-        s=col(df,"Status")
-        if s is None:return len(df),0
-        v=df[s].astype(str).str.upper(); return int((v=="VIOLATION").sum()),int((v=="UNVERIFIED").sum())
-    b1,b2=vc(bv); o1,o2=vc(ov); x=st.columns(4); x[0].metric("BASE VIOLATIONS",b1); x[1].metric("OPT VIOLATIONS",o1,delta=f"{o1-b1:+d}",delta_color="inverse"); x[2].metric("BASE UNVERIFIED",b2); x[3].metric("OPT UNVERIFIED",o2)
-    st.markdown("#### UNALLOCATED SKU DIAGNOSIS"); table(reasons); table(unallocated)
-    st.markdown("#### BASELINE CHECKS"); table(bv); st.markdown("#### OPTIMIZED CHECKS"); table(ov)
-
-elif page=="Downloads":
-    st.markdown("### MODULE 09 // DATA EXPORTS")
-    for name in ["evaluation_comparison.csv","optimized_allocation.csv","baseline_allocation.csv","warehouse_locations.csv","optimized_routes.csv","baseline_routes.csv","baseline_violations.csv","optimized_violations.csv","unallocated_skus.csv","unallocated_reason_summary.csv","affinity_pairs.csv","demand_profile.csv","sku_master.csv"]:
-        d=load_csv(name)
-        if d is not None: st.download_button(f"EXPORT {name}",d.to_csv(index=False),file_name=name,mime="text/csv",key=f"dl_{name}")
-    if dimensional is not None: st.download_button("EXPORT dimensional_fit.csv",dimensional.to_csv(index=False),file_name="dimensional_fit.csv",mime="text/csv",key="dl_dim")
-
-elif page=="ROI":
-    st.markdown("### MODULE 10 // THEORETICAL ROI")
-    b=metric(metrics,"total_distance_m","Baseline") or 0; o=metric(metrics,"total_distance_m") or 0; n=metric(metrics,"orders_simulated") or 1
-    annual=st.number_input("ANNUAL ORDERS",1000,5000000,500000,10000); speed=st.number_input("PICKER SPEED (M/S)",.5,5.,1.4,.1); rate=st.number_input("LABOR COST ($/HR)",10.,200.,25.,1.)
-    saved=max(0,b-o); meters=saved/n*annual; hours=meters/speed/3600; cost=hours*rate
-    x=st.columns(4); x[0].metric("DISTANCE SAVED/ORDER",f"{saved/n:.2f} m"); x[1].metric("ANNUAL DISTANCE",f"{meters/1000:,.0f} km"); x[2].metric("HOURS",f"{hours:,.0f}"); x[3].metric("THEORETICAL SAVING",f"${cost:,.0f}")
-    st.info("ROI values are extrapolations from simulated route distance, not measured warehouse savings.")
-
-st.divider(); st.caption(f"WH-INTELLIGENCE // LAST SYNC {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
+# Show the strongest retained SKU affinity pairs.
+st.subheader("Affinity pairs")
+st.dataframe(
+    pd.read_csv(DATA / "affinity_pairs.csv").head(50),
+    use_container_width=True,
+)

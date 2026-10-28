@@ -26,6 +26,22 @@ def _table_audit(path: Path, key: str | None = None) -> dict:
             "dtypes": {column: str(dtype) for column, dtype in frame.dtypes.items()}}
 
 
+def _affinity_input_quality(scoped: pd.DataFrame) -> dict:
+    """Count rows retained by compute_affinity's missing-identifier filter."""
+
+    missing_order = scoped["Order_ID"].isna()
+    missing_sku = scoped["SKU_ID"].isna()
+    excluded = missing_order | missing_sku
+    return {
+        "input_rows": int(len(scoped)),
+        "rows_missing_order_id": int(missing_order.sum()),
+        "rows_missing_sku_id": int(missing_sku.sum()),
+        "rows_missing_both_identifiers": int((missing_order & missing_sku).sum()),
+        "excluded_rows_missing_identifiers": int(excluded.sum()),
+        "retained_rows": int((~excluded).sum()),
+    }
+
+
 def _write_charts(profile: pd.DataFrame, affinity: pd.DataFrame, fit: pd.DataFrame) -> None:
     positive = profile.loc[profile.Observed_Demand].reset_index(drop=True)
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -53,6 +69,7 @@ def main() -> int:
     profile, demand = build_demand_profile(orders, skus, config)
     print("Built demand profile", flush=True)
     scoped = select_demand_scope(orders, config.get("demand_statuses", ["delivered"]))
+    affinity_quality = _affinity_input_quality(scoped)
     min_pair_count = int(config.get("affinity_min_pair_count", 2)); min_support = float(config.get("affinity_min_support", 0.0))
     affinity = compute_affinity(scoped, min_pair_count=min_pair_count, min_support=min_support)
     print("Computed affinity", flush=True)
@@ -79,7 +96,7 @@ def main() -> int:
     }
     timestamp_invalid = int(pd.to_datetime(orders.Timestamp, errors="coerce").isna().sum())
     location_dimensions = locations[["Bin_Width_cm", "Bin_Height_cm", "Bin_Depth_cm"]].drop_duplicates().to_dict("records")
-    summary = {"raw": raw, "source_quality": source_quality, "demand": demand, "status_distribution": {str(k): int(v) for k, v in orders.Order_Status.value_counts(dropna=False).items()}, "invalid_or_missing_normalized_timestamps": timestamp_invalid, "affinity": {"scope_orders": int(scoped.Order_ID.nunique()), "scope_lines": int(len(scoped)), "min_pair_count": min_pair_count, "min_support": min_support, "retained_pairs": int(len(affinity)), "top_pairs": affinity.head(10).to_dict("records")}, "fit": {"valid_dimension_products": int(fit.Dimensions_Valid.sum()), "metadata_indeterminate": int((~fit.Fit_Determinable).sum()), "no_fit": int(fit.Fits_No_Location.sum()), "small_fit_count_lte_5": int(fit.Small_Fit_Count.sum()), "location_count": int(len(locations)), "location_dimensions_cm": location_dimensions}}
+    summary = {"raw": raw, "source_quality": source_quality, "demand": demand, "status_distribution": {str(k): int(v) for k, v in orders.Order_Status.value_counts(dropna=False).items()}, "invalid_or_missing_normalized_timestamps": timestamp_invalid, "affinity": {"scope_orders": int(scoped.Order_ID.nunique()), "scope_lines": int(len(scoped)), **affinity_quality, "min_pair_count": min_pair_count, "min_support": min_support, "retained_pairs": int(len(affinity)), "top_pairs": affinity.head(10).to_dict("records")}, "fit": {"valid_dimension_products": int(fit.Dimensions_Valid.sum()), "metadata_indeterminate": int((~fit.Fit_Determinable).sum()), "no_fit": int(fit.Fits_No_Location.sum()), "small_fit_count_lte_5": int(fit.Small_Fit_Count.sum()), "location_count": int(len(locations)), "location_dimensions_cm": location_dimensions}}
     (REPORTS / "eda_summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     _write_charts(profile, affinity, fit)
     abc = profile.ABC_Class.value_counts().reindex(["A", "B", "C", "ZERO"], fill_value=0).to_dict()
@@ -91,7 +108,7 @@ This EDA reads local Olist raw tables and normalized `data/processed/orders.csv`
 
 ## Quality and reconciliation
 
-    Raw source audit is in `eda_summary.json`: {source_quality['items_missing_order_reference']:,} item lines lack an order reference, {source_quality['items_missing_product_reference']:,} lack a product reference, and the normalized-line reconciliation delta is {source_quality['normalized_line_reconciliation_delta']:,}. The normalized order data has {timestamp_invalid:,} missing/unparseable timestamps. The demand universe has {demand['positive_demand_skus']:,} observed-demand SKUs, {demand['zero_demand_skus']:,} zero-demand product-master SKUs, and {demand['unmatched_observed_skus']:,} observed SKUs absent from the product master. Product placement cannot be assessed for {demand['products_missing_or_invalid_dimensions']:,} products with missing/invalid dimensions and {demand['products_missing_or_invalid_weight']:,} with missing/invalid weight.
+Raw source audit is in `eda_summary.json`: {source_quality['items_missing_order_reference']:,} item lines lack an order reference, {source_quality['items_missing_product_reference']:,} lack a product reference, and the normalized-line reconciliation delta is {source_quality['normalized_line_reconciliation_delta']:,}. The normalized order data has {timestamp_invalid:,} missing/unparseable timestamps. The demand universe has {demand['positive_demand_skus']:,} observed-demand SKUs, {demand['zero_demand_skus']:,} zero-demand product-master SKUs, and {demand['unmatched_observed_skus']:,} observed SKUs absent from the product master. Product placement cannot be assessed for {demand['products_missing_or_invalid_dimensions']:,} products with missing/invalid dimensions and {demand['products_missing_or_invalid_weight']:,} with missing/invalid weight.
 
 ## Demand and ABC/Pareto
 

@@ -18,10 +18,6 @@ data/raw/*
 !data/raw/README.md
 data/processed/*
 !data/processed/.gitkeep
-
-# Local operational inventory and safety metadata must not be committed
-data/input/*
-!data/input/.gitkeep
 reports/*
 !reports/.gitkeep
 

@@ -10,8 +10,6 @@ from typing import Dict  # Types the returned table mapping.
 
 import pandas as pd  # Reads and transforms CSV data.
 
-from .operational_data import apply_operational_metadata
-
 # Locate the repository root relative to this source file.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -151,12 +149,6 @@ def normalize_olist(
             "Inventory_Units": pd.NA,
         }
     )
-
-    # Apply reviewed operational facts if the optional local overlay exists.
-    # The overlay is intentionally not bundled with the repository because its
-    # values must come from the actual warehouse and carry provenance.
-    normalized_skus, metadata_audit = apply_operational_metadata(normalized_skus)
-    normalized_skus.attrs["operational_metadata_audit"] = metadata_audit
 
     # Return normalized demand lines and SKU metadata separately.
     return normalized_orders, normalized_skus

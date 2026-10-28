@@ -11,14 +11,14 @@
         "order_delivered_customer_date": 2965
       },
       "dtypes": {
-        "order_id": "object",
-        "customer_id": "object",
-        "order_status": "object",
-        "order_purchase_timestamp": "object",
-        "order_approved_at": "object",
-        "order_delivered_carrier_date": "object",
-        "order_delivered_customer_date": "object",
-        "order_estimated_delivery_date": "object"
+        "order_id": "str",
+        "customer_id": "str",
+        "order_status": "str",
+        "order_purchase_timestamp": "str",
+        "order_approved_at": "str",
+        "order_delivered_carrier_date": "str",
+        "order_delivered_customer_date": "str",
+        "order_estimated_delivery_date": "str"
       }
     },
     "order_items": {
@@ -28,11 +28,11 @@
       "key_duplicates": null,
       "missing": {},
       "dtypes": {
-        "order_id": "object",
+        "order_id": "str",
         "order_item_id": "int64",
-        "product_id": "object",
-        "seller_id": "object",
-        "shipping_limit_date": "object",
+        "product_id": "str",
+        "seller_id": "str",
+        "shipping_limit_date": "str",
         "price": "float64",
         "freight_value": "float64"
       }
@@ -53,8 +53,8 @@
         "product_width_cm": 2
       },
       "dtypes": {
-        "product_id": "object",
-        "product_category_name": "object",
+        "product_id": "str",
+        "product_category_name": "str",
         "product_name_lenght": "float64",
         "product_description_lenght": "float64",
         "product_photos_qty": "float64",
@@ -83,6 +83,7 @@
     "positive_demand_skus": 32216,
     "zero_demand_skus": 735,
     "unmatched_observed_skus": 0,
+    "duplicate_sku_master_records": 0,
     "products_missing_or_invalid_dimensions": 2,
     "products_missing_or_invalid_weight": 6
   },
@@ -99,6 +100,12 @@
   "affinity": {
     "scope_orders": 96478,
     "scope_lines": 110197,
+    "input_rows": 110197,
+    "rows_missing_order_id": 0,
+    "rows_missing_sku_id": 0,
+    "rows_missing_both_identifiers": 0,
+    "excluded_rows_missing_identifiers": 0,
+    "retained_rows": 110197,
     "min_pair_count": 2,
     "min_support": 0.0,
     "retained_pairs": 203,
