@@ -265,3 +265,94 @@ def improve_layout_by_route_distance(
         "passes_completed": passes_completed,
         "search_terminated_by_limit": attempted >= int(max_swap_attempts),
     }
+
+
+def improve_layout_by_route_distance(
+    profile: pd.DataFrame,
+    locations: pd.DataFrame,
+    layout: pd.DataFrame,
+    orders: pd.DataFrame,
+    config: dict,
+    max_swap_attempts: int = 100,
+    max_passes: int = 1,
+    max_orders: int = 500,
+) -> tuple[pd.DataFrame, dict]:
+    """Refine a layout with bounded deterministic swaps that reduce route distance.
+
+    Each proposed layout is checked by the independent validator first, so
+    dimensional, location, ergonomic, and aggregate rack-load constraints remain
+    enforced during refinement.
+    """
+
+    current = layout.copy().reset_index(drop=True)
+    limits = {
+        "max_swap_attempts": max(0, int(max_swap_attempts)),
+        "max_passes": max(0, int(max_passes)),
+    }
+    if current.empty:
+        return current, {
+            "starting_distance_m": 0.0,
+            "final_distance_m": 0.0,
+            "accepted_swaps": 0,
+            "attempted_swaps": 0,
+            **limits,
+            "passes_completed": 0,
+            "search_terminated_by_limit": False,
+        }
+
+    def route_distance(candidate: pd.DataFrame) -> float:
+        routes = route_orders(orders, candidate, locations, max_orders=max_orders)
+        return float(routes["Distance_m"].sum()) if not routes.empty else 0.0
+
+    def known_feasible(candidate: pd.DataFrame) -> bool:
+        checks = validate_layout(candidate, profile, locations, config)
+        return checks.empty or not (checks["Status"] == "VIOLATION").any()
+
+    current_distance = route_distance(current)
+    starting_distance = current_distance
+    sku_order = sorted(current["SKU_ID"].tolist(), key=str)
+    location_by_sku = current.set_index("SKU_ID")["Location_ID"].to_dict()
+    attempted = 0
+    accepted = 0
+    passes_completed = 0
+
+    for _ in range(limits["max_passes"]):
+        if attempted >= limits["max_swap_attempts"]:
+            break
+        best_layout = None
+        best_distance = current_distance
+        for index, first_sku in enumerate(sku_order):
+            for second_sku in sku_order[index + 1:]:
+                if attempted >= limits["max_swap_attempts"]:
+                    break
+                attempted += 1
+                candidate = current.copy()
+                first_location = location_by_sku[first_sku]
+                second_location = location_by_sku[second_sku]
+                candidate.loc[candidate["SKU_ID"] == first_sku, "Location_ID"] = second_location
+                candidate.loc[candidate["SKU_ID"] == second_sku, "Location_ID"] = first_location
+                if not known_feasible(candidate):
+                    continue
+                candidate_distance = route_distance(candidate)
+                if candidate_distance < best_distance:
+                    best_distance = candidate_distance
+                    best_layout = candidate
+            if attempted >= limits["max_swap_attempts"]:
+                break
+        passes_completed += 1
+        if best_layout is None:
+            break
+        current = best_layout
+        current_distance = best_distance
+        location_by_sku = current.set_index("SKU_ID")["Location_ID"].to_dict()
+        accepted += 1
+
+    return current, {
+        "starting_distance_m": starting_distance,
+        "final_distance_m": current_distance,
+        "accepted_swaps": accepted,
+        "attempted_swaps": attempted,
+        **limits,
+        "passes_completed": passes_completed,
+        "search_terminated_by_limit": attempted >= limits["max_swap_attempts"],
+    }

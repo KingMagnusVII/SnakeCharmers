@@ -327,6 +327,60 @@ def main() -> None:
         scoped,
         config,
     )
+    refined, local_search_info = improve_layout_by_route_distance(
+        profile,
+        locations,
+        greedy,
+        scoped,
+        config,
+        max_swap_attempts=config.get("max_local_search_iterations", 100),
+        max_passes=1,
+        max_orders=500,
+    )
+
+    # Compare candidates on the same route sample and keep only layouts with no
+    # known hard-constraint violations. This prevents refinement from making a
+    # route improvement at the expense of warehouse feasibility.
+    candidates = {"baseline": baseline, "greedy": greedy, "refined": refined}
+    candidate_metrics = {}
+    feasible_candidates = {}
+    for name, candidate in candidates.items():
+        validation = validate_layout(candidate, skus, locations, config)
+        violations = (
+            int((validation["Status"] == "VIOLATION").sum())
+            if not validation.empty
+            else 0
+        )
+        candidate_routes = route_orders(scoped, candidate, locations, max_orders=500)
+        distance = (
+            float(candidate_routes["Distance_m"].sum())
+            if not candidate_routes.empty
+            else 0.0
+        )
+        candidate_metrics[name] = {
+            "total_route_distance_m": distance,
+            "known_violations": violations,
+        }
+        if violations == 0:
+            feasible_candidates[name] = distance
+
+    if not feasible_candidates:
+        raise RuntimeError(
+            "No baseline, greedy, or refined layout passed hard-constraint validation."
+        )
+    tie_break_order = {"baseline": 0, "greedy": 1, "refined": 2}
+    selected_name = min(
+        feasible_candidates,
+        key=lambda name: (feasible_candidates[name], tie_break_order[name]),
+    )
+    optimized = candidates[selected_name]
+    opt_info["local_search"] = local_search_info
+    opt_info["candidate_layouts"] = candidate_metrics
+    opt_info["selected_layout"] = selected_name
+    opt_info["selection_reason"] = (
+        f"{selected_name} has the lowest simulated route distance among layouts "
+        "with no known hard-constraint violations"
+    )
 
     baseline.to_csv(out / "baseline_allocation.csv", index=False)
     optimized.to_csv(out / "optimized_allocation.csv", index=False)
