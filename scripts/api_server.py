@@ -78,9 +78,9 @@ def inventory() -> list[dict]:
             "Demand_Class": row.get("Demand_Class", ""),
             "Zone": loc.get("Zone", ""),
             "Location_ID": row.get("Location_ID", ""),
-            "Units": 1,
+            "Units": None,  # Olist has no current stock snapshot; do not invent on-hand counts.
             "Capacity": number(loc.get("Volumetric_Capacity_cm3", 0)),
-            "Status": "ALLOCATED",
+            "Status": "STOCK UNKNOWN",  # Allocation is not current stock availability.
             "Unit_Value": 0,
         })
     return rows
@@ -151,10 +151,17 @@ class Handler(BaseHTTPRequestHandler):
                 optimized = parse_qs(urlparse(self.path).query).get("layout", ["optimized"])[0] != "baseline"
                 return json_response(self, routes(optimized))
             if path == "/api/validation":
+                baseline = [dict(row, Layout="BASELINE") for row in typed(read_csv("baseline_violations.csv"))]
+                optimized = [dict(row, Layout="OPTIMIZED") for row in typed(read_csv("optimized_violations.csv"))]
+                rows = baseline + optimized
                 return json_response(self, {
                     "evaluation": evaluation(),
-                    "baseline_violations": len(read_csv("baseline_violations.csv")),
-                    "optimized_violations": len(read_csv("optimized_violations.csv")),
+                    "baseline_violations": sum(row.get("Status") == "VIOLATION" for row in baseline),
+                    "optimized_violations": sum(row.get("Status") == "VIOLATION" for row in optimized),
+                    "baseline_unverified": sum(row.get("Status") == "UNVERIFIED" for row in baseline),
+                    "optimized_unverified": sum(row.get("Status") == "UNVERIFIED" for row in optimized),
+                    "rows": rows,
+                    "available": bool(baseline or optimized),
                 })
             if path == "/api/downloads":
                 return json_response(self, {"files": processed_files()})
