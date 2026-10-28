@@ -251,6 +251,19 @@ def main() -> None:
         "\n".join(strategy_lines) + "\n", encoding="utf-8"
     )
 
+    (reports / "source_order_coverage_report.md").write_text(
+        "# Source-order coverage (first 500 source orders)\n\n"
+        "This report includes source orders with zero SKUs in the optimized layout. "
+        "It is separate from the historical pickable-order route sample, which skips zero-pick orders.\n\n"
+        f"- Source orders counted: {source_order_metrics['orders_simulated']}\n"
+        f"- Complete orders: {source_order_metrics['complete_orders']}\n"
+        f"- Incomplete orders: {source_order_metrics['incomplete_orders']}\n"
+        f"- Completion rate: {source_order_metrics['completion_rate']:.1%}\n"
+        f"- Orders with zero pickable SKUs: {int((source_routes['Visited_SKUs'].astype(str).str.len() == 0).sum())}\n"
+        f"- Route distance: {source_order_metrics['total_distance_m']:.1f} m\n",
+        encoding="utf-8",
+    )
+
     (reports / "data_foundation_audit.md").write_text(
         "# Data foundation audit\n\n"
         "Verified raw tables, normalized schemas, "
