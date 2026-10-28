@@ -137,7 +137,7 @@ The main run configuration is `config/simulation_config.json`.
 
 The current routing simulation also has `max_orders=500` as a default argument in `src/routing.py`. The current Ridge implementation uses fixed settings in code (`alpha=1.0`, median imputation, standard scaling, most-frequent category imputation, one-hot encoding, and a minimum of 20 training rows); these are not currently exposed as JSON configuration parameters.
 
-Warehouse geometry is configured separately in `config/warehouse_config.json`: 6 aisles; two rack sides per aisle; 5 bays per rack; 4 shelf levels; aisle spacing 3.0 m; bay spacing 1.2 m; first aisle X = 3.0 m; first bay Y = 2.0 m; default bin dimensions 40 × 30 × 40 cm; levels 1 and 2 use 100 × 60 × 60 cm bins; level weight capacities 40/35/30/20 kg; shelf limit 200 kg; rack limit 700 kg; and four dedicated oversized slots with their own configured dimensions, capacities, and coordinates. These are synthetic assumptions and must be replaced with measured site data for a real warehouse.
+Warehouse geometry is configured separately in `config/warehouse_config.json`: 13 aisles; two rack sides per aisle; 5 bays per rack; 4 shelf levels (520 standard locations plus 4 oversized locations, 524 total); aisle spacing 3.0 m; bay spacing 1.2 m; first aisle X = 3.0 m; first bay Y = 2.0 m; default bin dimensions 40 × 30 × 40 cm; levels 1 and 2 use 100 × 60 × 60 cm bins; level weight capacities 40/35/30/20 kg; shelf limit 200 kg; rack limit 700 kg; and four dedicated oversized slots with their own configured dimensions, capacities, and coordinates. These are synthetic assumptions and must be replaced with measured site data for a real warehouse.
 
 ## Future AI upgrade plan
 
