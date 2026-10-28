@@ -8,7 +8,7 @@ import time  # Measures end-to-end pipeline runtime.
 from pathlib import Path  # Provides cross-platform filesystem paths.
 
 # Resolve the repository root from this script's location.
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 
 # Make the repository root importable when this file is executed directly.
 if str(ROOT) not in sys.path:
@@ -89,8 +89,8 @@ def main() -> None:
     # Define output directories and create them if they do not already exist.
     out = ROOT / "data" / "processed"
     reports = ROOT / "reports"
-    out.mkdir(exist_ok=True)
-    reports.mkdir(exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
 
     # Load the simulation settings from the JSON configuration file.
     config = json.loads(
