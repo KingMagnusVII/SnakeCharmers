@@ -34,7 +34,7 @@ warehouseNodes = demoNodes;
 export async function loadBackendData(): Promise<void> {
   const base=(import.meta.env.VITE_API_BASE_URL as string|undefined)?.replace(/\/$/,"") || "http://127.0.0.1:8000";
   try {
-    const [inv,nodes,overview,routes]=await Promise.all([
+    const [inv,nodes,overview,routes,validation]=await Promise.all([
       fetch(`${base}/api/inventory`).then(r=>{if(!r.ok) throw new Error(`inventory ${r.status}`);return r.json()}),
       fetch(`${base}/api/warehouse/nodes`).then(r=>{if(!r.ok) throw new Error(`warehouse ${r.status}`);return r.json()}),
       fetch(`${base}/api/overview`).then(r=>{if(!r.ok) throw new Error(`overview ${r.status}`);return r.json()}),
