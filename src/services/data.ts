@@ -7,6 +7,8 @@ export let inventory: InventoryItem[] = [];
 export let warehouseNodes: WarehouseNode[] = [];
 export let evaluation: Record<string,{baseline:number;optimized:number;change:number}> = {};
 export let routeRows: Record<string,unknown>[] = [];
+export let validationRows: Record<string,unknown>[] = [];
+export let validationAvailable = false;
 export let dataReady = false;
 
 const demoInventory: InventoryItem[] = Array.from({length:72},(_,i)=>({
@@ -36,7 +38,8 @@ export async function loadBackendData(): Promise<void> {
       fetch(`${base}/api/inventory`).then(r=>{if(!r.ok) throw new Error(`inventory ${r.status}`);return r.json()}),
       fetch(`${base}/api/warehouse/nodes`).then(r=>{if(!r.ok) throw new Error(`warehouse ${r.status}`);return r.json()}),
       fetch(`${base}/api/overview`).then(r=>{if(!r.ok) throw new Error(`overview ${r.status}`);return r.json()}),
-      fetch(`${base}/api/routes`).then(r=>{if(!r.ok) throw new Error(`routes ${r.status}`);return r.json()})
+      fetch(`${base}/api/routes`).then(r=>{if(!r.ok) throw new Error(`routes ${r.status}`);return r.json()}),
+      fetch(`${base}/api/validation`).then(r=>{if(!r.ok) throw new Error(`validation ${r.status}`);return r.json()})
     ]);
     // A reachable API can still have no generated pipeline CSVs. Do not replace
     // the usable demo dataset with empty arrays and incorrectly label it live.
@@ -47,6 +50,8 @@ export async function loadBackendData(): Promise<void> {
     warehouseNodes=nodes as WarehouseNode[];
     evaluation=overview.evaluation ?? {};
     routeRows=Array.isArray(routes) ? routes as Record<string,unknown>[] : [];
+    validationRows=Array.isArray(validation.rows) ? validation.rows as Record<string,unknown>[] : [];
+    validationAvailable=Boolean(validation.available);
     dataReady=true;
     demoNotice=routeRows.length
       ? "LIVE DATA // Magnus pipeline outputs"
@@ -55,6 +60,8 @@ export async function loadBackendData(): Promise<void> {
     console.warn("Magnus API unavailable; using local demo fallback.",error);
     demoNotice="DEMO FALLBACK // API data unavailable or pipeline outputs missing; run scripts\\run_pipeline.py, then restart the API";
     dataReady=false;
+    validationRows=[];
+    validationAvailable=false;
   }
 }
 
