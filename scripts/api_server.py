@@ -1,13 +1,17 @@
 """Small local API for the React/Vite dashboard.
 
-Serves the generated files under data/processed without adding another runtime
-web framework. Start it from the repository root with:
+Loads the generated pipeline CSVs once and keeps parsed/indexed data in memory.
+This avoids reopening and reparsing the processed files on every dashboard
+request.
+
+Start from the repository root with:
     .venv\Scripts\python.exe scripts\api_server.py
 """
 from __future__ import annotations
 
 import csv
 import json
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -18,12 +22,14 @@ HOST = "127.0.0.1"
 PORT = 8000
 
 
-def read_csv(name: str) -> list[dict]:
+@lru_cache(maxsize=None)
+def read_csv(name: str) -> tuple[dict, ...]:
+    """Read a processed CSV once per server lifetime."""
     path = PROCESSED / name
     if not path.exists():
-        return []
+        return ()
     with path.open("r", encoding="utf-8-sig", newline="") as fh:
-        return list(csv.DictReader(fh))
+        return tuple(csv.DictReader(fh))
 
 
 def number(value):
@@ -34,14 +40,14 @@ def number(value):
         return value
 
 
-def typed(rows: list[dict]) -> list[dict]:
+def typed(rows) -> list[dict]:
     return [{k: number(v) for k, v in row.items()} for row in rows]
 
 
+@lru_cache(maxsize=1)
 def evaluation() -> dict:
-    rows = read_csv("evaluation_comparison.csv")
     result: dict[str, dict] = {}
-    for row in rows:
+    for row in read_csv("evaluation_comparison.csv"):
         result[row["Metric"]] = {
             "baseline": number(row["Baseline"]),
             "optimized": number(row["Optimized"]),
@@ -50,11 +56,21 @@ def evaluation() -> dict:
     return result
 
 
+@lru_cache(maxsize=1)
+def location_index() -> dict[str, dict]:
+    return {r["Location_ID"]: r for r in read_csv("warehouse_locations.csv")}
+
+
+@lru_cache(maxsize=1)
+def allocation_index() -> dict[str, dict]:
+    return {r["Location_ID"]: r for r in read_csv("optimized_allocation.csv")}
+
+
+@lru_cache(maxsize=1)
 def inventory() -> list[dict]:
-    allocation = read_csv("optimized_allocation.csv")
-    locations = {r["Location_ID"]: r for r in read_csv("warehouse_locations.csv")}
+    locations = location_index()
     rows = []
-    for row in allocation:
+    for row in read_csv("optimized_allocation.csv"):
         loc = locations.get(row["Location_ID"], {})
         rows.append({
             "SKU_ID": row.get("SKU_ID", ""),
@@ -70,8 +86,9 @@ def inventory() -> list[dict]:
     return rows
 
 
+@lru_cache(maxsize=1)
 def warehouse_nodes() -> list[dict]:
-    allocation = {r["Location_ID"]: r for r in read_csv("optimized_allocation.csv")}
+    allocation = allocation_index()
     rows = []
     for loc in read_csv("warehouse_locations.csv"):
         alloc = allocation.get(loc["Location_ID"])
@@ -89,9 +106,15 @@ def warehouse_nodes() -> list[dict]:
     return rows
 
 
+@lru_cache(maxsize=2)
 def routes(optimized: bool = True) -> list[dict]:
     name = "optimized_routes.csv" if optimized else "baseline_routes.csv"
     return typed(read_csv(name))
+
+
+@lru_cache(maxsize=1)
+def processed_files() -> list[str]:
+    return sorted(p.name for p in PROCESSED.glob("*.csv"))
 
 
 def json_response(handler: BaseHTTPRequestHandler, payload, status: int = 200):
@@ -99,7 +122,7 @@ def json_response(handler: BaseHTTPRequestHandler, payload, status: int = 200):
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Cache-Control", "public, max-age=5")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -134,10 +157,9 @@ class Handler(BaseHTTPRequestHandler):
                     "optimized_violations": len(read_csv("optimized_violations.csv")),
                 })
             if path == "/api/downloads":
-                files = [p.name for p in PROCESSED.glob("*.csv")]
-                return json_response(self, {"files": sorted(files)})
+                return json_response(self, {"files": processed_files()})
             return json_response(self, {"error": "Not found"}, 404)
-        except Exception as exc:  # keep frontend errors visible and actionable
+        except Exception as exc:
             return json_response(self, {"error": str(exc)}, 500)
 
     def log_message(self, fmt, *args):
@@ -146,5 +168,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"SnakeCharmers API: http://{HOST}:{PORT}")
-    print(f"Reading pipeline outputs from: {PROCESSED}")
+    print(f"Pipeline data: {PROCESSED}")
+    print("Processed CSVs are parsed once and cached in memory.")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
