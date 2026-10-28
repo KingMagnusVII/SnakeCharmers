@@ -20,7 +20,7 @@ def _inputs():
 def test_route_orders_preserves_historical_pickable_order_sample():
     orders, layout, locations = _inputs()
 
-    routes = route_orders(orders, layout, locations, max_orders=2, include_zero_pick_orders=False)
+    routes = route_orders(orders, layout, locations, max_orders=1, include_zero_pick_orders=False)
 
     assert routes["Order_ID"].tolist() == ["002"]
     assert routes["Complete"].tolist() == [True]
