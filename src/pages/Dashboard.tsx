@@ -23,8 +23,8 @@ function csvDownload(name:string,rows:Record<string,string|number>[]){const cols
 function OutOfStock(){
  const [q,setQ]=useState("");
  const known=inventory.filter(i=>typeof i.Units==="number"&&Number.isFinite(i.Units));
- const out=known.filter(i=>i.Units!<=0);
- const low=known.filter(i=>i.Units!>0&&i.Status==="LOW STOCK");
+ const out=known.filter(i=>Number(i.Units)<=0);
+ const low=known.filter(i=>Number(i.Units)>0&&i.Status==="LOW STOCK");
  const review=inventory.filter(i=>i.Status==="REVIEW");
  const unknown=inventory.filter(i=>typeof i.Units!=="number"||!Number.isFinite(i.Units));
  const filtered=inventory.filter(i=>Object.values(i).some(v=>String(v??"").toLowerCase().includes(q.toLowerCase())));
@@ -65,7 +65,7 @@ export default function Dashboard({active}:{active:ModuleKey}){
  <MetricCard label="UNVERIFIED CHECKS" value={validationAvailable?formatNum(validationRows.filter(r=>r.Status==="UNVERIFIED").length):"NO DATA"} delta="MISSING / UNKNOWN INPUTS" icon={<Activity/>}/>
  <MetricCard label="SOURCE STATUS" value={validationAvailable?"LOADED":"MISSING"} delta="PYTHON VALIDATION CSVs" icon={<CheckCircle2/>}/>
  </div><Panel title="CONSTRAINT VALIDATION LOG" eyebrow="PYTHON VALIDATOR // BASELINE AND OPTIMIZED LAYOUTS">
- {validationAvailable&&validationRows.length>0?<DataTable rows={validationRows.map(r=>({LAYOUT:String(r.Layout??""),SKU_ID:String(r.SKU_ID??""),LOCATION_ID:String(r.Location_ID??""),RULE:String(r.Rule??""),STATUS:String(r.Status??""),MEASURED:String(r.Measured??""),LIMIT:String(r.Limit??""),DETAILS:String(r.Details??"")}))} limit={14}/>:<div className="empty-state"><AlertTriangle size={30}/><h3>VALIDATION OUTPUT NOT LOADED</h3><p>Run the Python pipeline successfully, confirm baseline_violations.csv and optimized_violations.csv exist in data/processed, then restart the API and refresh pipeline data.</p></div>}
+ {validationAvailable&&validationRows.length>0?<DataTable rows={validationRows.map(r=>({LAYOUT:String(r.Layout??""),SKU_ID:String(r.SKU_ID??""),LOCATION_ID:String(r.Location_ID??""),RULE:String(r.Rule??""),STATUS:String(r.Status??""),MEASURED:String(r.Measured??""),LIMIT:String(r.Limit??""),DETAILS:String(r.Details??"")}))} limit={14}/>:validationAvailable?<div className="empty-state"><CheckCircle2 size={30}/><h3>VALIDATION FILES LOADED — NO ROWS</h3><p>The validator output files exist but contain no violation or unverified records. Confirm this matches the pipeline run before interpreting it as clean.</p></div>:<div className="empty-state"><AlertTriangle size={30}/><h3>VALIDATION OUTPUT NOT LOADED</h3><p>Run the Python pipeline successfully, confirm baseline_violations.csv and optimized_violations.csv exist in data/processed, then restart the API and refresh pipeline data.</p></div>}
  <p className="hint">VIOLATION means a confirmed rule breach. UNVERIFIED means required source metadata is missing or unknown; it does not mean the layout is compliant. These rows come from the Python validator, not frontend status labels.</p>
  </Panel></>}
  {active==="downloads"&&<Panel title="REPORT CENTER" eyebrow="LOCAL EXPORTS"><div className="download-grid"><div className="download-card"><Database/><div><strong>Inventory snapshot</strong><span>Current frontend adapter records</span></div><button className="action-button" onClick={()=>csvDownload("inventory.csv",inventory)}>EXPORT CSV</button></div><div className="download-card"><MapPinned/><div><strong>Warehouse nodes</strong><span>Coordinates and allocation status</span></div><button className="action-button" onClick={()=>csvDownload("warehouse-nodes.csv",nodeRows)}>EXPORT CSV</button></div></div></Panel>}
