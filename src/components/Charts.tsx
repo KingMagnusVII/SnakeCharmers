@@ -63,19 +63,24 @@ export function AllocationChart() {
 }
 
 export function RouteChart() {
-  const distances = routeRows.map(row => Number(row.Distance_m ?? 0)).filter(Number.isFinite);
+  const distances = routeRows.map(row => Number(row.Distance_m)).filter(value => Number.isFinite(value) && value >= 0);
   const total = evaluation.total_distance_m?.optimized ?? distances.reduce((sum, value) => sum + value, 0);
   const complete = routeRows.filter(row => String(row.Complete).toLowerCase() === "true").length;
   const max = Math.max(...distances, 1);
+  const shown = distances.slice(0, 60);
   return <div className="route-chart">
     <div className="metrics-inline">
       <span>OPTIMIZED DISTANCE <b>{total.toLocaleString("en-IN", { maximumFractionDigits: 1 })} m</b></span>
       <span>ROUTES <b>{routeRows.length.toLocaleString("en-IN")}</b></span>
       <span>COMPLETE <b>{complete.toLocaleString("en-IN")}</b></span>
     </div>
-    {distances.length ? <div className="route-bars">{distances.slice(0, 60).map((distance, i) =>
-      <i key={i} title={`${distance.toFixed(1)} m`} style={{ height: `${Math.max(3, distance / max * 100)}%` }} />
-    )}</div> : <div className="empty-state">NO ROUTE DATA LOADED — start the Python API and load optimized pipeline outputs.</div>}
+    {shown.length ? <>
+      <div className="route-bars" role="img" aria-label={`Route distances for the first ${shown.length} of ${distances.length} route records, in metres`}>
+        {shown.map((distance, i) => <i key={i} title={`Route ${i + 1}: ${distance.toFixed(1)} m`} style={{ height: `${Math.max(3, distance / max * 100)}%` }} />)}
+      </div>
+      <div className="route-chart-axis"><span>ROUTE 1</span><span>Each bar = one order's route distance (m)</span><span>ROUTE {shown.length}</span></div>
+      {distances.length > shown.length && <p>SHOWING FIRST {shown.length} OF {distances.length} ROUTES</p>}
+    </> : <div className="empty-state">NO ROUTE DATA LOADED — start the Python API and load optimized pipeline outputs.</div>}
     <p>OPTIMIZED ROUTE OUTPUT // MAGNUS PIPELINE</p>
   </div>;
 }
@@ -83,20 +88,30 @@ export function RouteChart() {
 export function TrendChart() {
   const baseline = evaluation.total_distance_m?.baseline ?? 0;
   const optimized = evaluation.total_distance_m?.optimized ?? 0;
-  const values = [baseline, optimized];
+  const delta = optimized - baseline;
+  const improvement = baseline > 0 ? (baseline - optimized) / baseline * 100 : 0;
   const hasEvaluation = baseline > 0 || optimized > 0;
-  const max = Math.max(...values, 1);
+  const max = Math.max(...[baseline, optimized], 1);
+  const same = hasEvaluation && Math.abs(delta) < 0.05;
   return <div className="route-chart">
     {!hasEvaluation && <div className="empty-state">NO EVALUATION METRICS LOADED — verify evaluation_comparison.csv and restart the API.</div>}
-    {hasEvaluation && <div className="comparison-bars">
-      {([["BASELINE", baseline], ["OPTIMIZED", optimized]] as [string, number][]).map(([label, value], i) =>
-        <div key={label}>
-          <strong>{value.toLocaleString("en-IN", { maximumFractionDigits: 1 })} m</strong>
-          <div className="comparison-bar" style={{ height: `${Math.max(12, value / max * 160)}px`, background: colors[i] }} />
-          <span>{label}</span>
-        </div>
-      )}
-    </div>}
-    <p>ROUTE DISTANCE COMPARISON // LIVE EVALUATION</p>
+    {hasEvaluation && <>
+      <div className="comparison-bars">
+        {([[ "BASELINE", baseline ], [ "OPTIMIZED", optimized ]] as [string, number][]).map(([label, value], i) =>
+          <div key={label}>
+            <strong>{value.toLocaleString("en-IN", { maximumFractionDigits: 1 })} m</strong>
+            <div className="comparison-bar" style={{ height: `${Math.max(12, value / max * 160)}px`, background: colors[i] }} />
+            <span>{label}</span>
+          </div>
+        )}
+      </div>
+      <div className={`evaluation-result ${same ? "no-improvement" : improvement > 0 ? "improved" : "regressed"}`}>
+        {same ? "NO DISTANCE IMPROVEMENT RECORDED — baseline and optimized totals are equal." :
+          improvement > 0 ? `${improvement.toFixed(1)}% shorter route distance in the optimized evaluation.` :
+          `${Math.abs(improvement).toFixed(1)}% longer route distance in the optimized evaluation.`}
+        <small>Difference: {delta > 0 ? "+" : ""}{delta.toLocaleString("en-IN", { maximumFractionDigits: 1 })} m · Same evaluation file and sample required for a fair comparison.</small>
+      </div>
+    </>}
+    <p>ROUTE DISTANCE COMPARISON // EVALUATION CSV</p>
   </div>;
 }
