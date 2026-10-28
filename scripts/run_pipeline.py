@@ -43,7 +43,7 @@ def optimize_and_refine_layout(profile, locations, baseline, affinity, scoped, c
     for name, candidate in candidates.items():
         validation = validate_layout(candidate, profile, locations, config)
         violations = int((validation["Status"] == "VIOLATION").sum()) if not validation.empty else 0
-        route_table = route_orders(scoped, candidate, locations, max_orders=500)
+        route_table = route_orders(scoped, candidate, locations, max_orders=500, include_zero_pick_orders=False)
         distance = float(route_table["Distance_m"].sum()) if not route_table.empty else 0.0
         candidate_metrics[name] = {
             "total_route_distance_m": distance,
@@ -152,8 +152,8 @@ def main() -> None:
     baseline_validation = _validation_summary(baseline_violations)
     optimized_validation = _validation_summary(optimized_violations)
 
-    baseline_routes = route_orders(scoped, baseline, locations)
-    optimized_routes = route_orders(scoped, optimized, locations)
+    baseline_routes = route_orders(scoped, baseline, locations, include_zero_pick_orders=False)
+    optimized_routes = route_orders(scoped, optimized, locations, include_zero_pick_orders=False)
     baseline_routes.to_csv(out / "baseline_routes.csv", index=False)
     optimized_routes.to_csv(out / "optimized_routes.csv", index=False)
 
@@ -180,7 +180,7 @@ def main() -> None:
         scoped,
         config,
     )
-    coverage_routes = route_orders(scoped, coverage_optimized, locations)
+    coverage_routes = route_orders(scoped, coverage_optimized, locations, include_zero_pick_orders=False)
     coverage_metrics = evaluate(
         coverage_routes, coverage_optimized, profile, locations, config
     )
