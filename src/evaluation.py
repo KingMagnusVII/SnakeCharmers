@@ -9,11 +9,8 @@ import pandas as pd  # Provides DataFrame operations.
 def _completion_mask(routes: pd.DataFrame) -> pd.Series:
     """Return true for completed routes, including CSV-loaded string flags."""
 
-    # Empty route tables cannot contain completed orders.
     if routes.empty or "Complete" not in routes:
         return pd.Series(False, index=routes.index)
-
-    # Accept both Python booleans and strings loaded back from CSV.
     return routes["Complete"].map(
         lambda value: value is True or str(value).strip().lower() == "true"
     )
@@ -28,34 +25,25 @@ def _complete_orders(routes: pd.DataFrame) -> int:
 def evaluate(routes, layout, profile, locations, config):
     """Calculate route, utilization, coverage, and data-quality metrics."""
 
-    # Count simulated routes/orders.
     route_count = len(routes)
     completion_mask = _completion_mask(routes)
-
     complete_orders = int(completion_mask.sum())
     incomplete_orders = route_count - complete_orders
 
-    # Total distance across all simulated routes.
     distance = float(routes["Distance_m"].sum()) if route_count else 0.0
-
-    # Separate completed and incomplete route distances.
     complete_distance = (
         float(routes.loc[completion_mask, "Distance_m"].sum())
         if complete_orders
         else 0.0
     )
-
     incomplete_distance = (
         float(routes.loc[~completion_mask, "Distance_m"].sum())
         if incomplete_orders
         else 0.0
     )
 
-    # Keep only warehouse locations used by the supplied layout.
     selected = locations[locations.Location_ID.isin(layout.Location_ID)]
 
-    # Preserve catalog-wide coverage, but also measure the configured active
-    # assortment that the allocator is actually asked to place.
     max_active_skus = int(config.get("max_active_skus", 200))
     active_fields = {"SKU_ID", "Physical_Metadata_Usable", "Recorded_Order_Lines"}
     if active_fields.issubset(profile.columns):
@@ -69,7 +57,6 @@ def evaluate(routes, layout, profile, locations, config):
             .head(max_active_skus)
         )
     else:
-        # Keep evaluation usable for small legacy/test profiles without metadata.
         active_profile = profile.head(max_active_skus)
     active_sku_ids = set(active_profile["SKU_ID"])
     active_assortment_count = len(active_sku_ids)
@@ -79,27 +66,23 @@ def evaluate(routes, layout, profile, locations, config):
         else 0
     )
 
-    # Keep only profile rows represented in the layout.
     profile_rows = profile[profile.SKU_ID.isin(layout.SKU_ID)]
-
-    # Calculate total physical capacity across the warehouse.
     capacity = float(locations.Volumetric_Capacity_cm3.sum())
 
-    # Estimate occupied volume from the modeled representative stock.
-    used = float(profile_rows.Volume_cm3.fillna(0).sum())
+    # Use observed inventory when available; otherwise use the configured
+    # representative-stock assumption, matching the feasibility model.
+    stock_units = pd.to_numeric(profile_rows["Inventory_Units"], errors="coerce").fillna(
+        float(config.get("representative_inventory_units", 1))
+    )
+    used = float((profile_rows.Volume_cm3.fillna(0) * stock_units).sum())
 
-    # Calculate capacity of only the bins selected by the layout.
     selected_capacity = float(selected.Volumetric_Capacity_cm3.sum())
-
-    # Count recorded demand lines represented by the whole profile.
     order_lines = float(profile.Recorded_Order_Lines.sum())
 
-    # Missing product attributes remain visible as data-quality limitations.
     unknown_hazard = profile_rows["Hazard_Class"].isna() | profile_rows["Hazard_Class"].astype(str).str.strip().str.upper().isin(["", "UNSPECIFIED", "UNKNOWN"])
     unknown_handling = profile_rows["Handling_Type"].isna() | profile_rows["Handling_Type"].astype(str).str.strip().str.upper().isin(["", "UNSPECIFIED", "UNKNOWN"])
     unknown_inventory = pd.to_numeric(profile_rows["Inventory_Units"], errors="coerce").isna()
 
-    # Return all metrics in one dictionary for report generation.
     return {
         "orders_simulated": int(route_count),
         "complete_orders": complete_orders,
@@ -114,7 +97,6 @@ def evaluate(routes, layout, profile, locations, config):
             else 0.0
         ),
         "average_distance_m": distance / route_count if route_count else 0.0,
-        # No completed orders uses 0.0 because a completed-order average is undefined.
         "average_distance_complete_orders_m": (
             complete_distance / complete_orders if complete_orders else 0.0
         ),
@@ -126,8 +108,6 @@ def evaluate(routes, layout, profile, locations, config):
         "allocated_bin_utilization": (
             used / selected_capacity if selected_capacity else 0.0
         ),
-        # Catalog-wide coverage is retained for context; these metrics show
-        # coverage of the configured active assortment the allocator targets.
         "allocation_coverage": len(layout) / len(profile) if len(profile) else 0.0,
         "active_assortment_sku_count": int(active_assortment_count),
         "active_assortment_allocated_sku_count": int(allocated_active_count),
@@ -152,22 +132,15 @@ def evaluate(routes, layout, profile, locations, config):
 
 def compare(baseline, optimized):
     """Create a row-by-row metric comparison between two layouts."""
-
-    # Store one comparison row for every metric appearing in either result.
     out = []
     for key in sorted(set(baseline) | set(optimized)):
-        # Read the baseline and optimized values for this metric.
         base = baseline.get(key)
         improved = optimized.get(key)
-
-        # Calculate a numeric change only when both values are real numbers.
         change = (
             improved - base
             if isinstance(improved, Real) and isinstance(base, Real)
             else None
         )
-
-        # Append the comparison record.
         out.append(
             {
                 "Metric": key,
@@ -176,6 +149,4 @@ def compare(baseline, optimized):
                 "Change": change,
             }
         )
-
-    # Return a table suitable for CSV export and dashboard display.
     return pd.DataFrame(out)
