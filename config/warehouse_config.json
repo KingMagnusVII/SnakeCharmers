@@ -1,6 +1,6 @@
 {
   "description": "Synthetic topology for a prototype; replace with measured warehouse data when available.",
-  "aisles": 6,
+  "aisles": 13,
   "rack_sides_per_aisle": ["L", "R"],
   "bays_per_rack": 5,
   "shelf_levels_per_rack": 4,
@@ -25,7 +25,7 @@
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 2.0
     },
     {
@@ -35,7 +35,7 @@
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 3.2
     },
     {
@@ -45,7 +45,7 @@
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 4.4
     },
     {
@@ -55,9 +55,9 @@
       "max_weight_capacity_kg": 40.0,
       "shelf_max_load_kg": 200.0,
       "rack_max_load_kg": 700.0,
-      "x_m": 21.0,
+      "x_m": 42.0,
       "y_m": 5.6
     }
   ],
-  "zone_aisle_ranges": {"A": [1, 2], "B": [3, 4], "C": [5, 6]}
+  "zone_aisle_ranges": {"A": [1, 4], "B": [5, 9], "C": [10, 13]}
 }
