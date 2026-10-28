@@ -833,7 +833,9 @@ def test_pipeline_passes_greedy_layout_through_local_search(monkeypatch):
         }
         return refined_layout, {"accepted_swaps": 1}
 
-    def fake_route_orders(orders_arg, layout_arg, locations_arg, max_orders):
+    def fake_route_orders(
+        orders_arg, layout_arg, locations_arg, max_orders, include_zero_pick_orders=False
+    ):
         distance = 1.0 if layout_arg.iloc[0].Location_ID == "L2" else 2.0
         return pd.DataFrame({"Distance_m": [distance]})
 
@@ -903,7 +905,7 @@ def test_pipeline_does_not_select_worse_refined_layout(monkeypatch):
     monkeypatch.setattr(
         run_pipeline,
         "route_orders",
-        lambda orders_arg, layout_arg, locations_arg, max_orders: pd.DataFrame(
+        lambda orders_arg, layout_arg, locations_arg, max_orders, include_zero_pick_orders=False: pd.DataFrame(
             {"Distance_m": [float({"L1": 1, "L2": 2, "L3": 3}[layout_arg.iloc[0].Location_ID])]}
         ),
     )
