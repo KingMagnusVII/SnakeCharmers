@@ -922,3 +922,61 @@ def test_pipeline_does_not_select_worse_refined_layout(monkeypatch):
     pd.testing.assert_frame_equal(result, baseline)
     assert info["selected_layout"] == "baseline"
     assert info["selection_reason"].startswith("baseline has the lowest")
+
+
+def test_source_order_sample_uses_earliest_timestamps_not_order_id_sort():
+    orders = pd.DataFrame(
+        {
+            "Order_ID": ["z-late", "a-middle", "m-early", "m-early"],
+            "SKU_ID": ["A", "B", "C", "D"],
+            "Timestamp": pd.to_datetime(
+                ["2024-01-03", "2024-01-02", "2024-01-01", "2024-01-01"]
+            ),
+        }
+    )
+
+    sample = run_pipeline._source_order_sample(orders, max_orders=2)
+
+    assert set(sample.Order_ID) == {"m-early", "a-middle"}
+    assert len(sample) == 3
+
+
+def test_source_sku_diagnosis_separates_metadata_fit_cap_and_allocation_causes():
+    profile = pd.DataFrame(
+        [
+            {"SKU_ID": "allocated", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1, "Physical_Metadata_Usable": True},
+            {"SKU_ID": "bad-metadata", "Width_cm": None, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1, "Physical_Metadata_Usable": False},
+            {"SKU_ID": "too-large", "Width_cm": 200, "Height_cm": 200, "Depth_cm": 200, "Weight_kg": 1, "Physical_Metadata_Usable": True},
+            {"SKU_ID": "excluded", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1, "Physical_Metadata_Usable": True},
+            {"SKU_ID": "selected-unallocated", "Width_cm": 5, "Height_cm": 5, "Depth_cm": 5, "Weight_kg": 1, "Physical_Metadata_Usable": True},
+        ]
+    )
+    locations = _locations()
+    source_orders = pd.DataFrame(
+        {
+            "Order_ID": ["o1", "o2", "o3", "o4", "o5"],
+            "SKU_ID": ["allocated", "bad-metadata", "too-large", "excluded", "selected-unallocated"],
+        }
+    )
+    candidates = pd.DataFrame({"SKU_ID": ["allocated", "selected-unallocated"]})
+    layout = pd.DataFrame({"SKU_ID": ["allocated"], "Location_ID": ["L1"]})
+    routes = pd.DataFrame(
+        {
+            "Order_ID": ["o1", "o2", "o3", "o4", "o5"],
+            "Visited_SKUs": ["allocated", "", "", "", ""],
+        }
+    )
+
+    detail, summary = run_pipeline._source_sku_diagnosis(
+        source_orders, profile, locations, candidates, layout, CONFIG, routes
+    )
+
+    diagnosis = detail.set_index("SKU_ID").Diagnosis.to_dict()
+    assert diagnosis == {
+        "allocated": "allocated_and_pickable",
+        "bad-metadata": "missing_or_invalid_physical_metadata",
+        "too-large": "does_not_fit_any_location",
+        "excluded": "feasible_but_excluded_by_assortment_cap",
+        "selected-unallocated": "selected_but_not_allocated",
+    }
+    assert summary.Distinct_SKUs.sum() == 5
