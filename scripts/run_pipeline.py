@@ -206,7 +206,7 @@ def main() -> None:
                 "Complete_Orders": int(optimized_metrics["complete_orders"]),
                 "Completion_Rate": float(optimized_metrics["completion_rate"]),
                 "Total_Route_Distance_m": float(optimized_metrics["total_distance_m"]),
-                "Known_Violations": int(baseline_validation["known_violations"]),
+                "Known_Violations": int(optimized_validation["known_violations"]),
             },
             {
                 "Strategy": "Order-coverage-first",
