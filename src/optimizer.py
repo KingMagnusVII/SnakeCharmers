@@ -9,23 +9,29 @@ from .feasibility import fits_product, is_product_location_feasible, modeled_sto
 from .routing import route_orders
 
 
-def _affinity_index(affinity: pd.DataFrame) -> dict[str, list[tuple[str, float]]]:
-    """Build a symmetric SKU -> (related SKU, strength) lookup from affinity data."""
-    if affinity.empty:
+def _affinity_index(affinity: pd.DataFrame | None) -> dict[str, list[tuple[str, float]]]:
+    """Build a symmetric SKU -> (related SKU, strength) lookup from affinity data.
+
+    Older/main-branch affinity inputs may contain only SKU_A, SKU_B and
+    Pair_Count. When Lift is available, preserve the richer Magnus weighting;
+    otherwise use pair count as a deterministic strength signal.
+    """
+    if affinity is None or affinity.empty:
         return {}
-    required = {"SKU_A", "SKU_B", "Pair_Count", "Lift"}
+    required = {"SKU_A", "SKU_B", "Pair_Count"}
     if not required.issubset(affinity.columns):
         return {}
+    has_lift = "Lift" in affinity.columns
     index: dict[str, list[tuple[str, float]]] = {}
     for row in affinity.itertuples(index=False):
         try:
             pair_count = float(row.Pair_Count)
-            lift = float(row.Lift)
+            lift = float(getattr(row, "Lift", 1.0)) if has_lift else 1.0
         except (TypeError, ValueError):
             continue
         if pair_count <= 0 or not math.isfinite(lift) or lift <= 0:
             continue
-        strength = math.log1p(pair_count) * math.log1p(lift)
+        strength = math.log1p(pair_count) * math.log1p(lift) if has_lift else math.log1p(pair_count)
         index.setdefault(row.SKU_A, []).append((row.SKU_B, strength))
         index.setdefault(row.SKU_B, []).append((row.SKU_A, strength))
     return index
@@ -61,8 +67,14 @@ def _affinity_score(
 
 def optimize_layout(profile, locations, baseline, affinity, config):
     """Greedily reassign each SKU to a feasible location using ML, distance and affinity."""
+    objective_weights = dict(config.get("objective_weights", {}))
+    objective_weights.setdefault("distance", 1.0)
+    objective_weights.setdefault("affinity", 0.25)
+    objective_weights.setdefault("ergonomic", 0.1)
+    objective_weights.setdefault("waste", 0.00001)
+
     if baseline.empty:
-        return baseline.copy(), {"iterations": 0}
+        return baseline.copy(), {"iterations": 0, "objective_weights": objective_weights}
 
     profile_by_sku = profile.set_index("SKU_ID")
     affinity_index = _affinity_index(affinity)
@@ -71,9 +83,9 @@ def optimize_layout(profile, locations, baseline, affinity, config):
     used = set()
     rack_loads: dict[str, float] = {}
 
-    distance_weight = float(config.get("objective_weights", {}).get("distance", 1.0))
-    affinity_weight = float(config.get("objective_weights", {}).get("affinity", 0.25))
-    ergonomic_weight = float(config.get("objective_weights", {}).get("ergonomic", 0.1))
+    distance_weight = float(objective_weights["distance"])
+    affinity_weight = float(objective_weights["affinity"])
+    ergonomic_weight = float(objective_weights["ergonomic"])
 
     max_distance = float(locations["Distance_to_Dispatch_Depot_m"].max()) if not locations.empty else 0.0
     max_distance = max(max_distance, 1.0)
@@ -168,6 +180,7 @@ def optimize_layout(profile, locations, baseline, affinity, config):
         "heuristic": "feasible ML-priority distance/ergonomic greedy reassignment with affinity",
         "ml_demand_priority_used": ml_used,
         "affinity_pairs_used": sum(1 for sku in affinity_index if sku in placed_locations),
+        "objective_weights": objective_weights,
     }
 
 
