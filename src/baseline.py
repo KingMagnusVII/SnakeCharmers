@@ -4,7 +4,7 @@ from __future__ import annotations  # Enables modern type annotations.
 import pandas as pd  # Provides DataFrame operations.
 
 from .demand_analysis import product_dimensional_fit  # Reuses the dimensional-fit calculation.
-from .feasibility import fits_product, is_product_location_feasible  # Reuses dimensional and hard-constraint checks.
+from .feasibility import fits_product, is_product_location_feasible, modeled_stock_load_kg, rack_load_fits  # Reuses dimensional and hard-constraint checks.
 
 
 def select_feasible_candidates(
@@ -30,7 +30,7 @@ def select_feasible_candidates(
             ["Recorded_Order_Lines", "SKU_ID"],
             ascending=[False, True],
         )
-        .head(max_skus)
+        .head(max(0, max_skus))
         .copy()
     )
 
@@ -94,8 +94,6 @@ def select_order_coverage_candidates(
                 int(row.get("Recorded_Order_Lines", 0)),
             )
 
-        # Apply the final tie-break in ascending SKU order without relying on
-        # unordered set iteration.
         best_score = max(score(sku) for sku in remaining)
         chosen = min(sku for sku in remaining if score(sku) == best_score)
         rows.append(metadata[chosen])
@@ -104,6 +102,8 @@ def select_order_coverage_candidates(
         remaining.remove(chosen)
 
     return pd.DataFrame(rows, columns=feasible.columns).reset_index(drop=True)
+
+
 def allocate_baseline(
     profile: pd.DataFrame,
     locations: pd.DataFrame,
@@ -112,7 +112,6 @@ def allocate_baseline(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Allocate eligible SKUs to feasible locations deterministically."""
 
-    # Select dimensionally feasible products before applying the assortment cap.
     usable = profile[profile.Physical_Metadata_Usable].copy()
     eligible = (
         select_feasible_candidates(profile, locations, config)
@@ -120,8 +119,8 @@ def allocate_baseline(
         else candidates.copy()
     )
 
-    # Track occupied locations and products that could not be placed.
     used = set()
+    rack_loads: dict[str, float] = {}
     rows = []
     excluded = []
 
@@ -140,19 +139,14 @@ def allocate_baseline(
                 }
             )
 
-    # Place larger products first so they have the widest choice of bins.
     ordered = eligible.sort_values(
         ["Width_cm", "Height_cm", "Depth_cm", "SKU_ID"],
         ascending=[False, False, False, True],
     )
 
     for _, product in ordered.iterrows():
-        # Only locations not already assigned to another SKU are candidates.
         choices = locations[~locations.Location_ID.isin(used)]
 
-        # Reserve dedicated oversized slots for products that do not fit any
-        # standard bin. The 240 standard bins provide ample capacity for the
-        # configured active assortment, so normal SKUs should not consume them.
         if "Location_Type" in locations.columns:
             standard_locations = locations[locations.Location_Type != "OVERSIZED"]
             if not standard_locations.empty and standard_locations.apply(
@@ -163,19 +157,14 @@ def allocate_baseline(
             ).any():
                 choices = choices[choices.Location_Type != "OVERSIZED"]
 
-        # Apply the same feasibility rules used by the independent validator.
         match = choices[
             choices.apply(
-                lambda location: is_product_location_feasible(
-                    product,
-                    location,
-                    config,
-                ),
+                lambda location: is_product_location_feasible(product, location, config)
+                and rack_load_fits(product, location, rack_loads, config),
                 axis=1,
             )
         ].sort_values("Location_ID")
 
-        # Explain whether a product cannot fit any bin or failed remaining constraints.
         if match.empty:
             allow_rotations = bool(config.get("allow_rotations", True))
             dimensional_matches = locations[
@@ -192,11 +181,13 @@ def allocate_baseline(
             excluded.append({"SKU_ID": product.SKU_ID, "Reason": reason})
             continue
 
-        # Choose the first deterministic feasible location.
         location = match.iloc[0]
         used.add(location.Location_ID)
+        rack_load = modeled_stock_load_kg(product, config)
+        if rack_load is not None:
+            rack_id = location.get("Rack_ID")
+            rack_loads[rack_id] = rack_loads.get(rack_id, 0.0) + rack_load
 
-        # Save the allocation and explain why it was chosen.
         rows.append(
             {
                 "SKU_ID": product.SKU_ID,
@@ -206,7 +197,6 @@ def allocate_baseline(
             }
         )
 
-    # Return both successful allocations and excluded products.
     return (
         pd.DataFrame(rows, columns=["SKU_ID", "Location_ID", "Demand_Class", "Placement_Rationale"]),
         pd.DataFrame(excluded, columns=["SKU_ID", "Reason"]),
