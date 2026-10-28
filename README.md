@@ -116,7 +116,7 @@ The main run configuration is `config/simulation_config.json`.
 | Parameter | Current value | What it controls / status |
 |---|---|---|
 | `demand_statuses` | `["delivered"]` | Which order lines enter demand analysis, forecasting, affinity, and route simulation. |
-| `max_active_skus` | `200` | Maximum assortment size selected for allocation/evaluation. |
+| `max_active_skus` | `500` | Maximum assortment size selected for allocation/evaluation. |
 | `representative_inventory_units` | `1` | Fallback used when observed inventory is absent; simulation assumption only. |
 | `allow_rotations` | `true` | Allows dimension permutations when checking physical fit. |
 | `ergonomics.heavy_sku_weight_kg` | `10.0` | Configured weight threshold used by feasibility validation. |
