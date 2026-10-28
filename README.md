@@ -118,6 +118,9 @@ The main run configuration is `config/simulation_config.json`.
 | `demand_statuses` | `["delivered"]` | Which order lines enter demand analysis, forecasting, affinity, and route simulation. |
 | `max_active_skus` | `500` | Maximum assortment size selected for allocation/evaluation. |
 | `representative_inventory_units` | `1` | Fallback used when observed inventory is absent; simulation assumption only. |
+| `inventory_simulation.coverage_days` | `14` | Starting-stock coverage estimated from earlier training orders only; simulated units, not actual inventory. |
+| `inventory_simulation.train_fraction` | `0.8` | Fraction of unique order timestamps assigned to the chronological training period. |
+| `inventory_simulation.max_test_orders` | `0` | `0` evaluates all later test orders; a positive value limits evaluation to the earliest later orders. |
 | `allow_rotations` | `true` | Allows dimension permutations when checking physical fit. |
 | `ergonomics.heavy_sku_weight_kg` | `10.0` | Configured weight threshold used by feasibility validation. |
 | `ergonomics.max_shelf_level_for_heavy_skus` | `2` | Configured maximum shelf level for heavy SKUs in validation. |
@@ -150,6 +153,17 @@ A more powerful model should be introduced only after a reproducible evaluation 
 5. **Use a fair acceptance gate:** preserve the current Ridge + greedy version as a baseline. Adopt a replacement only when time-based test performance and end-to-end slotting metrics improve consistently, runtime is acceptable, tests pass, and safety/inventory data quality is not hidden by the model.
 
 Potential future model inputs should be documented by exact source field, transformation, missing-value treatment, and whether each feature is available at prediction time. Do not include customer/review/payment/geolocation fields just because they exist in Kaggle; first show that they improve a defined warehouse demand or routing objective without leakage.
+
+## Chronological inventory holdout experiment
+
+The pipeline also writes a separate, time-ordered inventory-and-picking experiment under `reports/inventory_holdout_experiment.md` and CSVs under `data/processed/inventory_holdout_*`.
+
+- Orders are split chronologically: the first 80% of distinct timestamps form the training period, and later timestamps form the test period. No test-period demand is used to estimate starting stock, select the assortment, calculate co-order affinity, train the demand forecast, or refine slotting.
+- Per-SKU starting stock is estimated as `ceil(training-period recorded order-item lines per day × 14 days)`. Because Olist has no explicit item-quantity or on-hand-inventory field, each recorded item line is a one-unit demand proxy. These are **simulated starting inventory quantities, not actual Kaggle inventory**.
+- The active assortment and baseline/optimized layouts are built from training-period demand. Both layouts must contain the same SKU assortment and are replayed against the exact same later test orders and starting-stock estimates.
+- Orders are replayed chronologically. An order is fulfilled only if all requested SKUs are allocated and enough simulated stock remains; only fulfilled orders deplete stock. Unallocated SKU demand is reported separately from stockouts. Routes are calculated for fulfilled orders, and the per-SKU ledger records starting stock, depletion, remaining stock, and stockout events/units.
+- By default, all later test orders are evaluated (`max_test_orders: 0`). Set a positive limit to evaluate only the earliest later orders. Configuration lives in `config/simulation_config.json` under `inventory_simulation`.
+- This experiment evaluates a stock-aware simulation and estimated walking routes, not verified real-world stock, measured walking distance, or globally optimal picking.
 
 ## Pipeline stages
 
