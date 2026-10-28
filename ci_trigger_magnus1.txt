@@ -1,1 +1,1 @@
-CI trigger for magnus1 validation.
+CI trigger for magnus1 validation - fresh run.
