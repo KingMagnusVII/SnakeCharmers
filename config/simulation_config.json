@@ -1,6 +1,6 @@
 {
   "demand_statuses": ["delivered"],
-  "max_active_skus": 200,
+  "max_active_skus": 500,
   "representative_inventory_units": 1,
   "allow_rotations": true,
   "ergonomics": {
