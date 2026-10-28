@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.affinity_analysis import compute_affinity
-from src.baseline import allocate_baseline, select_feasible_candidates
+from src.baseline import allocate_baseline
 from src.data_loader import load_olist_raw, normalize_olist
 from src.demand_analysis import analyze_demand
 from src.evaluation import compare, evaluate
@@ -25,14 +25,7 @@ from src.warehouse_generator import generate_warehouse
 
 def optimize_and_refine_layout(profile, locations, baseline, affinity, scoped, config):
     """Run greedy optimization followed by bounded route-distance refinement."""
-
-    greedy, opt_info = optimize_layout(
-        profile,
-        locations,
-        baseline,
-        affinity,
-        config,
-    )
+    greedy, opt_info = optimize_layout(profile, locations, baseline, affinity, config)
     refined, local_search_info = improve_layout_by_route_distance(
         profile,
         locations,
@@ -44,11 +37,7 @@ def optimize_and_refine_layout(profile, locations, baseline, affinity, scoped, c
         max_orders=500,
     )
 
-    candidates = {
-        "baseline": baseline,
-        "greedy": greedy,
-        "refined": refined,
-    }
+    candidates = {"baseline": baseline, "greedy": greedy, "refined": refined}
     candidate_metrics = {}
     feasible_candidates = {}
     for name, candidate in candidates.items():
@@ -63,9 +52,17 @@ def optimize_and_refine_layout(profile, locations, baseline, affinity, scoped, c
         if violations == 0:
             feasible_candidates[name] = distance
 
+    if not feasible_candidates:
+        raise RuntimeError(
+            "No baseline, greedy, or refined layout passed hard-constraint validation."
+        )
+
     selected_name = min(
         feasible_candidates,
-        key=lambda name: (feasible_candidates[name], ("baseline", "greedy", "refined").index(name)),
+        key=lambda name: (
+            feasible_candidates[name],
+            ("baseline", "greedy", "refined").index(name),
+        ),
     )
     optimized = candidates[selected_name]
     opt_info["local_search"] = local_search_info
@@ -100,6 +97,9 @@ def main() -> None:
     )
     tables = load_olist_raw(ROOT / "data" / "raw")
     orders, skus = normalize_olist(tables)
+    metadata_audit = skus.attrs.get(
+        "operational_metadata_audit", {"overlay_found": False}
+    )
     locations = generate_warehouse()
 
     orders.to_csv(out / "orders.csv", index=False)
@@ -107,20 +107,14 @@ def main() -> None:
     locations.to_csv(out / "warehouse_locations.csv", index=False)
 
     profile, quality = analyze_demand(orders, skus, config)
-
-    # Stage 10: learn temporal demand patterns and forecast the next week.
     profile, ml_info = forecast_next_week_demand(orders, profile, config)
     profile.to_csv(out / "demand_profile.csv", index=False)
     profile.to_csv(out / "ml_demand_forecast.csv", index=False)
 
     scoped = orders[orders.Order_Status.isin(config["demand_statuses"])]
 
-    # Build the historical baseline first. This keeps the benchmark independent
-    # of ML so the final evaluation can show whether ML actually improves it.
     baseline, excluded = allocate_baseline(profile, locations, config)
 
-    # Diagnose every active SKU that could not be allocated. This makes it clear
-    # whether the bottleneck is physical dimensions or remaining constraints.
     excluded.to_csv(out / "unallocated_skus.csv", index=False)
     reason_summary = (
         excluded["Reason"]
@@ -131,20 +125,14 @@ def main() -> None:
         else __import__("pandas").DataFrame(columns=["Reason", "SKU_Count"])
     )
     reason_summary["Share_of_Unallocated"] = (
-        reason_summary["SKU_Count"] / len(excluded)
-        if len(excluded)
-        else 0.0
+        reason_summary["SKU_Count"] / len(excluded) if len(excluded) else 0.0
     )
     reason_summary.to_csv(out / "unallocated_reason_summary.csv", index=False)
 
-    # Use the exact baseline assortment for affinity analysis so both strategies
-    # are compared on the same SKUs. The optimizer then uses ML demand priority
-    # when deciding which of those SKUs gets the best feasible locations.
     active = set(baseline.SKU_ID)
     affinity = compute_affinity(scoped, active)
+    affinity.to_csv(out / "affinity_pairs.csv", index=False)
 
-    # Improve the baseline using the project's feasible greedy heuristic,
-    # followed by bounded route-distance local search.
     optimized, opt_info = optimize_and_refine_layout(
         profile,
         locations,
@@ -157,12 +145,8 @@ def main() -> None:
     baseline.to_csv(out / "baseline_allocation.csv", index=False)
     optimized.to_csv(out / "optimized_allocation.csv", index=False)
 
-    baseline_violations = validate_layout(
-        baseline, skus, locations, config["allow_rotations"]
-    )
-    optimized_violations = validate_layout(
-        optimized, skus, locations, config["allow_rotations"]
-    )
+    baseline_violations = validate_layout(baseline, skus, locations, config)
+    optimized_violations = validate_layout(optimized, skus, locations, config)
     baseline_violations.to_csv(out / "baseline_violations.csv", index=False)
     optimized_violations.to_csv(out / "optimized_violations.csv", index=False)
     baseline_validation = _validation_summary(baseline_violations)
@@ -173,12 +157,8 @@ def main() -> None:
     baseline_routes.to_csv(out / "baseline_routes.csv", index=False)
     optimized_routes.to_csv(out / "optimized_routes.csv", index=False)
 
-    baseline_metrics = evaluate(
-        baseline_routes, baseline, profile, locations, config
-    )
-    optimized_metrics = evaluate(
-        optimized_routes, optimized, profile, locations, config
-    )
+    baseline_metrics = evaluate(baseline_routes, baseline, profile, locations, config)
+    optimized_metrics = evaluate(optimized_routes, optimized, profile, locations, config)
     comparison = compare(baseline_metrics, optimized_metrics)
     comparison.to_csv(out / "evaluation_comparison.csv", index=False)
 
@@ -186,6 +166,10 @@ def main() -> None:
         "# Data foundation audit\n\n"
         "Verified raw tables, normalized schemas, "
         f"{len(locations)} generated warehouse locations, and deterministic inputs.\n\n"
+        "Operational metadata overlay audit:\n\n"
+        "```json\n"
+        + json.dumps(metadata_audit, indent=2, default=str)
+        + "\n```\n\n"
         "```json\n"
         + json.dumps(quality, indent=2, default=str)
         + "\n```\n",
@@ -222,8 +206,6 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    # Explain why active-assortment SKUs remain unallocated so the next
-    # optimization step can target the real bottleneck instead of guessing.
     reason_lines = [
         "# Unallocated SKU diagnosis",
         "",
