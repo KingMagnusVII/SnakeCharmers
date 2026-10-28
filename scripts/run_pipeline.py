@@ -184,6 +184,17 @@ def main() -> None:
     coverage_metrics = evaluate(
         coverage_routes, coverage_optimized, profile, locations, config
     )
+
+    # Also evaluate the first 500 source orders without skipping orders for
+    # which the layout contains none of the requested SKUs. This is a separate,
+    # broader coverage measure and is not mixed with the historical route sample.
+    source_routes = route_orders(
+        scoped, optimized, locations, max_orders=500, include_zero_pick_orders=True
+    )
+    source_order_metrics = evaluate(
+        source_routes, optimized, profile, locations, config
+    )
+    source_routes.to_csv(out / "source_order_routes.csv", index=False)
     strategy_comparison = __import__("pandas").DataFrame(
         [
             {
@@ -192,9 +203,9 @@ def main() -> None:
                 "Unallocated_selected_SKUs": max(
                     int(len(demand_ranked_candidates)) - int(baseline.SKU_ID.nunique()), 0
                 ),
-                "Complete_Orders": int(baseline_metrics["complete_orders"]),
-                "Completion_Rate": float(baseline_metrics["completion_rate"]),
-                "Total_Route_Distance_m": float(baseline_metrics["total_distance_m"]),
+                "Complete_Orders": int(optimized_metrics["complete_orders"]),
+                "Completion_Rate": float(optimized_metrics["completion_rate"]),
+                "Total_Route_Distance_m": float(optimized_metrics["total_distance_m"]),
                 "Known_Violations": int(baseline_validation["known_violations"]),
             },
             {
@@ -223,7 +234,8 @@ def main() -> None:
         "# Assortment strategy comparison",
         "",
         "Both strategies use the same SKU cap, physical-fit checks, hard constraints, "
-        "500-order route sample, and route-distance refinement.",
+        "historical 500-order pickable sample, and route-distance refinement. "
+        "Route distance and completion metrics are taken from each strategy's optimized layout.",
         "",
         "| Strategy | Allocated SKUs | Unallocated selected SKUs | Complete orders | Completion rate | Route distance (m) | Known violations |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -336,6 +348,10 @@ def main() -> None:
             {
                 "baseline": baseline_metrics,
                 "optimized": optimized_metrics,
+                "source_order_coverage_first_500": source_order_metrics,
+                "source_orders_with_zero_pickable_skus": int(
+                    (source_routes["Visited_SKUs"].astype(str).str.len() == 0).sum()
+                ),
                 "baseline_violations": baseline_validation["known_violations"],
                 "baseline_unverified_checks": baseline_validation["unverified_checks"],
                 "optimized_violations": optimized_validation["known_violations"],
