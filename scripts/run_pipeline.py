@@ -14,7 +14,9 @@ if str(ROOT) not in sys.path:
 from src.affinity_analysis import compute_affinity
 from src.baseline import allocate_baseline, select_feasible_candidates, select_order_coverage_candidates
 from src.data_loader import load_olist_raw, normalize_olist
-from src.demand_analysis import analyze_demand
+import pandas as pd
+
+from src.demand_analysis import analyze_demand, product_dimensional_fit
 from src.evaluation import compare, evaluate
 from src.feasibility import validate_layout
 from src.ml_demand import forecast_next_week_demand
@@ -82,6 +84,84 @@ def _validation_summary(results):
         "known_violations": int((results["Status"] == "VIOLATION").sum()),
         "unverified_checks": int((results["Status"] == "UNVERIFIED").sum()),
     }
+
+
+def _source_order_sample(orders, max_orders=500):
+    """Select the earliest distinct source orders by timestamp, deterministically."""
+    valid = orders.loc[orders["Order_ID"].notna()].copy()
+    order_index = valid[["Order_ID"] + (["Timestamp"] if "Timestamp" in valid else [])].drop_duplicates("Order_ID")
+    if "Timestamp" in order_index:
+        order_index["Timestamp"] = pd.to_datetime(order_index["Timestamp"], errors="coerce")
+        order_index = order_index.sort_values(
+            ["Timestamp", "Order_ID"], kind="mergesort", na_position="last"
+        )
+    else:
+        order_index = order_index.sort_values("Order_ID", kind="mergesort")
+    selected_ids = set(order_index.head(max(0, int(max_orders)))["Order_ID"])
+    return valid.loc[valid["Order_ID"].isin(selected_ids)].copy()
+
+
+def _source_sku_diagnosis(source_orders, profile, locations, candidates, layout, config, routes):
+    """Explain why source-order SKUs are not present in a feasible allocated layout."""
+    dimensional_fit = product_dimensional_fit(
+        profile,
+        locations,
+        allow_rotations=bool(config.get("allow_rotations", True)),
+    ).set_index("SKU_ID")
+    profile_by_sku = profile.drop_duplicates("SKU_ID").set_index("SKU_ID")
+    candidate_ids = set(candidates["SKU_ID"]) if "SKU_ID" in candidates else set()
+    allocated_ids = set(layout["SKU_ID"]) if "SKU_ID" in layout else set()
+    zero_order_ids = set(
+        routes.loc[routes["Visited_SKUs"].fillna("").astype(str).eq(""), "Order_ID"]
+    )
+    rows = []
+    sku_orders = source_orders.loc[
+        source_orders["Order_ID"].notna() & source_orders["SKU_ID"].notna(),
+        ["Order_ID", "SKU_ID"],
+    ].drop_duplicates()
+    source_line_counts = source_orders.groupby("SKU_ID").size().to_dict()
+    for sku, group in sku_orders.groupby("SKU_ID", sort=True):
+        if sku in allocated_ids:
+            reason = "allocated_and_pickable"
+        elif sku not in profile_by_sku.index or not bool(
+            profile_by_sku.loc[sku].get("Physical_Metadata_Usable", False)
+        ):
+            reason = "missing_or_invalid_physical_metadata"
+        elif sku in dimensional_fit.index and int(
+            dimensional_fit.loc[sku, "Fit_Location_Count"]
+        ) == 0:
+            reason = "does_not_fit_any_location"
+        elif sku in candidate_ids:
+            reason = "selected_but_not_allocated"
+        else:
+            reason = "feasible_but_excluded_by_assortment_cap"
+        zero_affected = int(group.loc[group["Order_ID"].isin(zero_order_ids), "Order_ID"].nunique())
+        rows.append({
+            "SKU_ID": sku,
+            "Diagnosis": reason,
+            "Source_Order_Count": int(group["Order_ID"].nunique()),
+            "Source_Order_Line_Count": int(source_line_counts.get(sku, 0)),
+            "Zero_Pick_Orders_Affected": zero_affected,
+        })
+    detail = pd.DataFrame(rows, columns=[
+        "SKU_ID", "Diagnosis", "Source_Order_Count",
+        "Source_Order_Line_Count", "Zero_Pick_Orders_Affected",
+    ])
+    summary = (
+        detail.groupby("Diagnosis", as_index=False)
+        .agg(
+            Distinct_SKUs=("SKU_ID", "nunique"),
+            Source_Order_Lines=("Source_Order_Line_Count", "sum"),
+            Distinct_Source_Orders=("Source_Order_Count", "sum"),
+            Zero_Pick_Order_SKU_Incidences=("Zero_Pick_Orders_Affected", "sum"),
+        )
+        .sort_values("Diagnosis", kind="mergesort")
+        if not detail.empty else pd.DataFrame(columns=[
+            "Diagnosis", "Distinct_SKUs", "Source_Order_Lines",
+            "Distinct_Source_Orders", "Zero_Pick_Order_SKU_Incidences",
+        ])
+    )
+    return detail, summary
 
 
 def main() -> None:
@@ -185,16 +265,37 @@ def main() -> None:
         coverage_routes, coverage_optimized, profile, locations, config
     )
 
-    # Also evaluate the first 500 source orders without skipping orders for
-    # which the layout contains none of the requested SKUs. This is a separate,
-    # broader coverage measure and is not mixed with the historical route sample.
+    # Evaluate the earliest 500 distinct delivered source orders, including
+    # orders for which the layout contains none of the requested SKUs.
+    source_sample = _source_order_sample(scoped, max_orders=500)
     source_routes = route_orders(
-        scoped, optimized, locations, max_orders=500, include_zero_pick_orders=True
+        source_sample, optimized, locations, max_orders=500, include_zero_pick_orders=True
     )
     source_order_metrics = evaluate(
         source_routes, optimized, profile, locations, config
     )
+    coverage_source_routes = route_orders(
+        source_sample, coverage_optimized, locations,
+        max_orders=500, include_zero_pick_orders=True,
+    )
+    coverage_source_metrics = evaluate(
+        coverage_source_routes, coverage_optimized, profile, locations, config
+    )
     source_routes.to_csv(out / "source_order_routes.csv", index=False)
+    coverage_source_routes.to_csv(
+        out / "source_order_routes_coverage_first.csv", index=False
+    )
+
+    source_diagnosis_detail, source_diagnosis_summary = _source_sku_diagnosis(
+        source_sample, profile, locations, demand_ranked_candidates,
+        optimized, config, source_routes,
+    )
+    source_diagnosis_detail.to_csv(
+        out / "source_order_sku_diagnosis.csv", index=False
+    )
+    source_diagnosis_summary.to_csv(
+        out / "source_order_sku_diagnosis_summary.csv", index=False
+    )
     strategy_comparison = __import__("pandas").DataFrame(
         [
             {
@@ -207,6 +308,12 @@ def main() -> None:
                 "Completion_Rate": float(optimized_metrics["completion_rate"]),
                 "Total_Route_Distance_m": float(optimized_metrics["total_distance_m"]),
                 "Known_Violations": int(optimized_validation["known_violations"]),
+                "Source_Complete_Orders": int(source_order_metrics["complete_orders"]),
+                "Source_Completion_Rate": float(source_order_metrics["completion_rate"]),
+                "Source_Zero_Pick_Orders": int(
+                    source_routes["Visited_SKUs"].fillna("").astype(str).eq("").sum()
+                ),
+                "Source_Route_Distance_m": float(source_order_metrics["total_distance_m"]),
             },
             {
                 "Strategy": "Order-coverage-first",
@@ -224,6 +331,12 @@ def main() -> None:
                         )
                     )["known_violations"]
                 ),
+                "Source_Complete_Orders": int(coverage_source_metrics["complete_orders"]),
+                "Source_Completion_Rate": float(coverage_source_metrics["completion_rate"]),
+                "Source_Zero_Pick_Orders": int(
+                    coverage_source_routes["Visited_SKUs"].fillna("").astype(str).eq("").sum()
+                ),
+                "Source_Route_Distance_m": float(coverage_source_metrics["total_distance_m"]),
             },
         ]
     )
@@ -237,14 +350,16 @@ def main() -> None:
         "historical 500-order pickable sample, and route-distance refinement. "
         "Route distance and completion metrics are taken from each strategy's optimized layout.",
         "",
-        "| Strategy | Allocated SKUs | Unallocated selected SKUs | Complete orders | Completion rate | Route distance (m) | Known violations |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Strategy | Allocated SKUs | Unallocated selected SKUs | Pickable-sample complete | Pickable-sample rate | Pickable route distance (m) | Source complete (500) | Source rate | Source zero-pick orders | Source route distance (m) | Known violations |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in strategy_comparison.to_dict("records"):
         strategy_lines.append(
             f"| {row['Strategy']} | {row['Allocated_SKUs']} | "
             f"{row['Unallocated_selected_SKUs']} | {row['Complete_Orders']} | "
             f"{row['Completion_Rate']:.1%} | {row['Total_Route_Distance_m']:.1f} | "
+            f"{row['Source_Complete_Orders']} | {row['Source_Completion_Rate']:.1%} | "
+            f"{row['Source_Zero_Pick_Orders']} | {row['Source_Route_Distance_m']:.1f} | "
             f"{row['Known_Violations']} |"
         )
     (reports / "assortment_strategy_comparison.md").write_text(
@@ -252,15 +367,39 @@ def main() -> None:
     )
 
     (reports / "source_order_coverage_report.md").write_text(
-        "# Source-order coverage (first 500 source orders)\n\n"
-        "This report includes source orders with zero SKUs in the optimized layout. "
-        "It is separate from the historical pickable-order route sample, which skips zero-pick orders.\n\n"
-        f"- Source orders counted: {source_order_metrics['orders_simulated']}\n"
-        f"- Complete orders: {source_order_metrics['complete_orders']}\n"
-        f"- Incomplete orders: {source_order_metrics['incomplete_orders']}\n"
-        f"- Completion rate: {source_order_metrics['completion_rate']:.1%}\n"
-        f"- Orders with zero pickable SKUs: {int((source_routes['Visited_SKUs'].astype(str).str.len() == 0).sum())}\n"
-        f"- Route distance: {source_order_metrics['total_distance_m']:.1f} m\n",
+        "# Source-order coverage (earliest 500 delivered orders)\n\n"
+        "The sample is selected by purchase timestamp, not lexicographic order ID. "
+        "Both assortment strategies are evaluated on the same source-order sample. "
+        "This is separate from the historical pickable-order route sample.\n\n"
+        "| Strategy | Source orders | Complete | Incomplete | Completion rate | Zero-pick orders | Route distance (m) |\n"
+        "|---|---:|---:|---:|---:|---:|---:|\n"
+        f"| Demand-ranked | {source_order_metrics['orders_simulated']} | "
+        f"{source_order_metrics['complete_orders']} | {source_order_metrics['incomplete_orders']} | "
+        f"{source_order_metrics['completion_rate']:.1%} | "
+        f"{int(source_routes['Visited_SKUs'].fillna('').astype(str).eq('').sum())} | "
+        f"{source_order_metrics['total_distance_m']:.1f} |\n"
+        f"| Order-coverage-first | {coverage_source_metrics['orders_simulated']} | "
+        f"{coverage_source_metrics['complete_orders']} | {coverage_source_metrics['incomplete_orders']} | "
+        f"{coverage_source_metrics['completion_rate']:.1%} | "
+        f"{int(coverage_source_routes['Visited_SKUs'].fillna('').astype(str).eq('').sum())} | "
+        f"{coverage_source_metrics['total_distance_m']:.1f} |\n\n"
+        "## Why source-order SKUs are not pickable\n\n"
+        "Counts below are SKU incidences in the source sample. "
+        "Zero-pick order incidences can overlap because one order may contain multiple SKU causes.\n\n"
+        "| Diagnosis | Distinct SKUs | Source order lines | Distinct source orders (summed per SKU) | Zero-pick order incidences |\n"
+        "|---|---:|---:|---:|---:|\n"
+        + "".join(
+            f"| {row['Diagnosis']} | {int(row['Distinct_SKUs'])} | "
+            f"{int(row['Source_Order_Lines'])} | {int(row['Distinct_Source_Orders'])} | "
+            f"{int(row['Zero_Pick_Order_SKU_Incidences'])} |\n"
+            for row in source_diagnosis_summary.to_dict("records")
+        )
+        + "\nDiagnosis definitions:\n\n"
+        "- missing_or_invalid_physical_metadata: product lacks usable dimensions or positive weight.\n"
+        "- does_not_fit_any_location: physical metadata is usable, but no generated bin dimensions fit.\n"
+        "- feasible_but_excluded_by_assortment_cap: SKU could fit but was not selected by the demand-ranked assortment.\n"
+        "- selected_but_not_allocated: SKU was selected but not assigned a feasible slot.\n"
+        "- allocated_and_pickable: SKU is present in the layout.\n",
         encoding="utf-8",
     )
 
