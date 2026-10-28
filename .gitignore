@@ -21,5 +21,10 @@ data/processed/*
 reports/*
 !reports/.gitkeep
 
+# Local operational inventory and safety metadata
+# May contain sensitive/current warehouse information and must not be committed.
+data/input/*
+!data/input/.gitkeep
+
 # Secrets
 .streamlit/secrets.toml
