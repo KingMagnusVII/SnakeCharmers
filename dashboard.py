@@ -77,14 +77,15 @@ routes=load_csv("optimized_routes.csv"); base_routes=load_csv("baseline_routes.c
 affinity=load_csv("affinity_pairs.csv"); demand=load_csv("demand_profile.csv")
 unallocated=load_csv("unallocated_skus.csv"); reasons=load_csv("unallocated_reason_summary.csv")
 bv=load_csv("baseline_violations.csv"); ov=load_csv("optimized_violations.csv")
-dimensional=load_csv("dimensional_fit.csv") or make_dimensional_fit(optimized,skus,locations)
+dimensional = load_csv("dimensional_fit.csv")
+if dimensional is None:
+    dimensional = make_dimensional_fit(optimized, skus, locations)
 
 if metrics is None:
-    st.error("evaluation_comparison.csv is missing. Run: python scripts/run_pipeline.py")
+    st.error("evaluation_comparison.csv is missing. Run: python run_pipeline.py")
     st.stop()
 
-# Load and display baseline-versus-optimized metrics.
-metrics = pd.read_csv(comparison)
+# Display the baseline-versus-optimized metrics already loaded above.
 st.caption(
     "Synthetic warehouse geometry and representative-stock assumptions are "
     "simulation inputs, not measured safety data."
