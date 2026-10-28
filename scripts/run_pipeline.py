@@ -402,6 +402,42 @@ def main() -> None:
     comparison = compare(baseline_metrics, optimized_metrics)
     comparison.to_csv(out / "evaluation_comparison.csv", index=False)
 
+    # Persist an explicit audit of whether the chosen layout differs from the
+    # baseline, so a zero-improvement result is visible instead of implied.
+    baseline_slots = baseline.set_index("SKU_ID")["Location_ID"].astype(str).to_dict()
+    optimized_slots = optimized.set_index("SKU_ID")["Location_ID"].astype(str).to_dict()
+    all_skus = sorted(set(baseline_slots) | set(optimized_slots))
+    layout_diff = pd.DataFrame([
+        {
+            "SKU_ID": sku,
+            "Baseline_Location_ID": baseline_slots.get(sku, ""),
+            "Optimized_Location_ID": optimized_slots.get(sku, ""),
+            "Location_Changed": baseline_slots.get(sku) != optimized_slots.get(sku),
+            "Present_In_Baseline": sku in baseline_slots,
+            "Present_In_Optimized": sku in optimized_slots,
+        }
+        for sku in all_skus
+    ])
+    layout_diff.to_csv(out / "layout_comparison.csv", index=False)
+    (reports / "route_optimization_diagnostics.json").write_text(
+        json.dumps({
+            "selected_layout": opt_info.get("selected_layout", "unknown"),
+            "selection_reason": opt_info.get("selection_reason", ""),
+            "candidate_layouts": opt_info.get("candidate_layouts", {}),
+            "baseline_route_distance_m": float(baseline_routes["Distance_m"].sum()) if not baseline_routes.empty else 0.0,
+            "optimized_route_distance_m": float(optimized_routes["Distance_m"].sum()) if not optimized_routes.empty else 0.0,
+            "baseline_route_count": int(len(baseline_routes)),
+            "optimized_route_count": int(len(optimized_routes)),
+            "sku_count_compared": len(all_skus),
+            "sku_locations_changed": int(layout_diff["Location_Changed"].sum()) if not layout_diff.empty else 0,
+            "route_distance_change_m": (
+                float(optimized_routes["Distance_m"].sum() - baseline_routes["Distance_m"].sum())
+                if not baseline_routes.empty or not optimized_routes.empty else 0.0
+            ),
+        }, indent=2) + "\\n",
+        encoding="utf-8",
+    )
+
     # Compare the current demand-ranked assortment with an order-coverage-first
     # assortment under the same dimensional, rack-load, and layout constraints.
     demand_ranked_candidates = select_feasible_candidates(profile, locations, config)
