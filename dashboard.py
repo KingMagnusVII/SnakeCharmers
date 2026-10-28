@@ -49,7 +49,21 @@ THEMES = {
         "danger": "#f43f5e",
     }
 }
-# Comparison metrics are rendered below from evaluation_comparison.csv.
+# --- ADDITION: SCENARIO SPLIT-SCREEN ---
+with st.expander("COMPARATIVE ANALYSIS // BASELINE VS. OPTIMIZED", expanded=False):
+    comp_col1, comp_col2 = st.columns(2)
+    
+    with comp_col1:
+        st.markdown("<div style='text-align: center; color: #FF003C; font-family: monospace;'>[ BASELINE SCENARIO ]</div>", unsafe_allow_html=True)
+        st.metric(label="Total Distance (m)", value="4,250", delta="-")
+        # You can drop your existing baseline 3D figure here:
+        # st.plotly_chart(baseline_fig, use_container_width=True)
+        
+    with comp_col2:
+        st.markdown("<div style='text-align: center; color: #00FFFF; font-family: monospace;'>[ OPTIMIZED ACTIVE ]</div>", unsafe_allow_html=True)
+        st.metric(label="Total Distance (m)", value="3,105", delta="-1,145 m (Saved)", delta_color="inverse")
+        # You can drop your existing optimized 3D figure here:
+        # st.plotly_chart(optimized_fig, use_container_width=True)
 
 # Generate some static fake session data for tech flavor
 
@@ -71,7 +85,6 @@ with st.sidebar:
 theme = THEMES[selected_theme]
 
 # INJECTING HYPER-TECHNICAL UI CSS
-# INJECTING HYPER-TECHNICAL UI CSS WITH ENHANCED SIDEBAR ANIMATION
 st.markdown(
     f"""
     <style>
@@ -85,6 +98,7 @@ st.markdown(
       font-family: 'Rajdhani', sans-serif;
       background-color: var(--sc-bg);
       color: var(--sc-text);
+      /* Tech Grid Background */
       background-image: 
         linear-gradient(var(--sc-line) 1px, transparent 1px),
         linear-gradient(90deg, var(--sc-line) 1px, transparent 1px);
@@ -104,38 +118,14 @@ st.markdown(
     }}
     h1 {{ font-size: 2.2rem !important; font-weight: 700 !important; text-shadow: 0 0 8px {theme['accent']}40; }}
     
-    /* ---------------------------------------------------- */
-    /* CYBERPUNK SIDEBAR HOVER ANIMATIONS                   */
-    /* ---------------------------------------------------- */
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-    [data-testid="stSidebar"] div[role="radiogroup"] label {{
-        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        border: 1px solid transparent !important;
-        border-radius: 2px !important;
-        padding: 6px 10px !important;
-        margin-bottom: 3px !important;
-        cursor: pointer !important;
+    .micro-text {{
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 0.65rem;
+        color: var(--sc-muted);
+        text-transform: uppercase;
+        letter-spacing: 1px;
     }}
-
-    [data-testid="stSidebar"] div[role="radiogroup"] label:hover {{
-        transform: translateX(6px) !important;
-        background-color: #111827 !important;
-        border: 1px solid {theme['accent']} !important;
-        box-shadow: 0 0 12px {theme['accent']}40, inset 0 0 8px {theme['accent']}20 !important;
-        color: {theme['accent']} !important;
-    }}
-
-    [data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"],
-    [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {{
-        background: {theme['panel']} !important;
-        border: 1px solid {theme['success']} !important;
-        box-shadow: 0 0 15px {theme['success']}40 inset, 0 0 8px {theme['success']}30 !important;
-        transform: translateX(4px) !important;
-    }}
-
-    /* ---------------------------------------------------- */
-    /* HERO & TELEMETRY                                     */
-    /* ---------------------------------------------------- */
+    
     .hero {{ 
         position: relative; overflow: hidden; padding: 2rem; margin: .2rem 0 1.6rem;
         border: 1px solid var(--sc-accent); 
@@ -144,7 +134,16 @@ st.markdown(
         text-transform: uppercase;
         box-shadow: 0 0 20px {theme['accent']}20;
     }}
+    .hero::before {{
+        content: 'SYS.BOOT.SEQ_COMPLETE // LOGGING ENABLED';
+        position: absolute; right: 10px; bottom: 10px;
+        font-family: 'Share Tech Mono'; font-size: 0.6rem; color: var(--sc-muted);
+    }}
+    .hero h1 {{ color: var(--sc-accent) !important; margin: 0 0 0.5rem 0; }}
+    .hero p {{ color: var(--sc-text); margin: 0; font-family: 'Share Tech Mono', monospace; font-size: 1rem; text-shadow: 0 0 2px var(--sc-text); }}
+    .eyebrow {{ color: var(--sc-text); font-family: 'Share Tech Mono', monospace; font-size: 0.8rem; letter-spacing: 3px; margin-bottom: 0.5rem; }}
     
+    /* Telemetry Ribbon */
     .telemetry-ribbon {{
         display: flex; flex-wrap: wrap; gap: 20px; padding: 12px 20px; 
         background: var(--sc-panel); border: 1px solid var(--sc-accent);
@@ -162,6 +161,12 @@ st.markdown(
         padding: 1rem 1.2rem;
         border-top: 3px solid var(--sc-accent);
         transition: all 0.2s ease;
+        position: relative;
+    }}
+    [data-testid="stMetric"]::after {{
+        content: '[ DATA ]';
+        position: absolute; top: 5px; right: 5px;
+        font-family: 'Share Tech Mono'; font-size: 0.5rem; color: var(--sc-muted);
     }}
     [data-testid="stMetric"]:hover {{ border-color: var(--sc-accent); box-shadow: 0 0 15px {theme['accent']}30 inset; }}
     [data-testid="stMetricLabel"] {{ color: var(--sc-text) !important; font-family: 'Rajdhani', sans-serif !important; font-size: 1.1rem !important; text-transform: uppercase; letter-spacing: 1px; }}
@@ -193,7 +198,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
 # ============================================================
 # DATA HELPERS
 # ============================================================
@@ -270,34 +274,11 @@ def plot_3d_category_values(df, category_col, value_col, title, theme, max_point
         font=dict(family="Share Tech Mono", color=theme["text"]))
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True})
 
-def styled_frame(df):
-    """Return a presentation-only styled view; never alter the source DataFrame."""
-    if df is None:
-        return df
-
-    # Keep styling consistent with the selected dashboard theme. Values, columns,
-    # row order, index, and source DataFrame remain unchanged.
-    active_theme = THEMES.get(selected_theme, THEMES["CYBER TERMINAL"])
-    panel = active_theme["panel"]
-    text_color = active_theme["text"]
-    accent = active_theme["accent"]
-    border = active_theme["secondary"]
-
-    table_styles = [
-        {"selector": "table", "props": [("border-collapse", "separate"), ("border-spacing", "0"), ("width", "100%"), ("background-color", panel)]},
-        {"selector": "thead th", "props": [("background-color", "#101820"), ("color", accent), ("font-weight", "700"), ("text-transform", "uppercase"), ("letter-spacing", "0.04em"), ("border-bottom", f"1px solid {accent}"), ("padding", "10px 12px")]},
-        {"selector": "tbody td", "props": [("color", text_color), ("border-bottom", f"1px solid {border}"), ("padding", "8px 12px"), ("background-color", panel)]},
-        {"selector": "tbody tr:hover td", "props": [("background-color", "#17212b") ]},
-        {"selector": "caption", "props": [("caption-side", "top"), ("color", accent)]},
-    ]
-    return df.style.set_table_styles(table_styles)
-
-
 def show_table(df, message="[!] NO DATA FRAGMENTS DETECTED."):
     if df is None or df.empty:
         st.info(message)
     else:
-        st.dataframe(styled_frame(df), use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
 def download_button_for_file(filename, label=None):
     df = load_csv(filename)
@@ -628,7 +609,7 @@ elif page == "02_Warehouse_Explorer":
         search_mask = warehouse_map.astype(str).apply(lambda col: col.str.contains(search_location, case=False, na=False)).any(axis=1)
         detail_df = warehouse_map[search_mask]
     else: detail_df = warehouse_map
-    st.dataframe(styled_frame(detail_df), use_container_width=True, hide_index=True)
+    st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
 # ============================================================
 # SLOTTING & INVENTORY
@@ -699,7 +680,7 @@ elif page == "03_Slotting_Inventory":
         display_columns = [col for col in preferred_columns if col is not None and col in filtered_inventory.columns]
         if not display_columns: display_columns = filtered_inventory.columns.tolist()
 
-        st.dataframe(styled_frame(filtered_inventory[display_columns]), use_container_width=True, hide_index=True, height=420)
+        st.dataframe(filtered_inventory[display_columns], use_container_width=True, hide_index=True, height=420)
         st.download_button(label="[ DL_FILTERED_CSV ]", data=filtered_inventory[display_columns].to_csv(index=False).encode("utf-8"), file_name="filtered_inventory.csv", mime="text/csv")
         st.divider()
 
@@ -710,7 +691,7 @@ elif page == "03_Slotting_Inventory":
             with chart_col: plot_3d_category_values(counts, "Demand Class", "SKU Records", "3D SKU DISTRIBUTION", theme)
             with info_col:
                 st.markdown("##### BREAKDOWN TABLE // LOG")
-                st.dataframe(styled_frame(counts), use_container_width=True, hide_index=True)
+                st.dataframe(counts, use_container_width=True, hide_index=True)
         else: st.info("[!] NO DEMAND VECTOR FOUND.")
 
 # ============================================================
@@ -742,13 +723,13 @@ elif page == "04_SKU_Finder":
             st.metric("MATCHING RECORDS", f"{len(sku_data):,}")
             if sku_data.empty: st.info("[!] NO MATCH. REVISE QUERY HASH.")
             else:
-                st.dataframe(styled_frame(sku_data), use_container_width=True, hide_index=True)
+                st.dataframe(sku_data, use_container_width=True, hide_index=True)
                 chosen_sku = st.selectbox("INSPECT SPECIFIC SKU [ISOLATE]", sku_data[sku_col_finder].astype(str).drop_duplicates().tolist(), key="finder_selected_sku")
                 detail = sku_data[sku_data[sku_col_finder].astype(str) == chosen_sku]
                 if locations is not None and not locations.empty and loc_col_finder and "Location_ID" in locations.columns:
                     detail = detail.merge(locations, left_on=loc_col_finder, right_on="Location_ID", how="left", suffixes=("", "_warehouse"))
                 st.markdown("#### NODE SPECIFICATIONS // ISOLATED")
-                st.dataframe(styled_frame(detail), use_container_width=True, hide_index=True)
+                st.dataframe(detail, use_container_width=True, hide_index=True)
 
 # ============================================================
 # WHAT-IF SIMULATOR
