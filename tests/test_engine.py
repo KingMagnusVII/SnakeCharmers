@@ -45,8 +45,10 @@ def _rules(layout, skus=None, locations=None, config=CONFIG):
 
 
 def test_warehouse_deterministic_count():
-    assert len(generate_warehouse()) == 240
-    assert generate_warehouse().equals(generate_warehouse())
+    warehouse = generate_warehouse()
+    assert len(warehouse) == 244
+    assert (warehouse["Location_Type"] == "OVERSIZED").sum() == 4
+    assert warehouse.equals(generate_warehouse())
 
 
 def test_rotation_boundary_and_missing_dimensions():
