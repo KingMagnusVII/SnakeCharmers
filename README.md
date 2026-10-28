@@ -9,6 +9,7 @@
 ![Python](https://img.shields.io/badge/Python-3.15-3776AB?logo=python&logoColor=white)
 ![pandas](https://img.shields.io/badge/pandas-3.x-150458?logo=pandas&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-Ridge-F7931E?logo=scikitlearn&logoColor=white)
+![SciPy MILP](https://img.shields.io/badge/SciPy-MILP%20module-8CAAE6?logo=scipy&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-dashboard-FF4B4B?logo=streamlit&logoColor=white)
 ![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
 ![Status](https://img.shields.io/badge/status-research%20prototype-orange)
@@ -39,8 +40,9 @@ SnakeCharmers is a **reproducible research prototype** that uses historical Olis
 
 | | |
 |---|---|
-| **Forecast model** | Ridge regression on weekly order-line counts |
-| **Optimizer** | Rule-based greedy heuristic + bounded swap local search (not a trained model) |
+| **Demand forecast** | scikit-learn Ridge regression on weekly recorded order-line counts |
+| **Default slotting optimizer** | Greedy heuristic + bounded feasible-swap local search |
+| **MILP assortment selector** | Separate two-stage experimental module; not called by the default pipeline |
 | **Routing** | Nearest-next-SKU, Manhattan distance |
 | **Warehouse** | Synthetic: 6 aisles × 2 rack sides × 5 bays × 4 shelf levels, plus 4 oversized slots |
 | **Active assortment** | Configured assortment cap; actual selected count depends on allocation and feasibility |
@@ -141,12 +143,13 @@ Fields in these files must **not** be described as current model features. They 
 
 ## 🧠 How it works
 
-Two distinct components work together:
+The codebase contains three different roles. **Ridge forecasting and heuristic slotting are wired into the default pipeline; the MILP assortment selector is a separate experiment and is not currently called by `scripts/run_pipeline.py`.** MILP does not replace Ridge: they solve different problems.
 
-| # | Component | Module | Type |
+| # | Component | Module | Type / status |
 |:---:|---|---|---|
-| 1 | **Demand forecast** | `src/ml_demand.py` | Supervised **Ridge regression** |
-| 2 | **Slotting optimizer** | `src/optimizer.py` | Rule-based **greedy heuristic** + bounded local search (not a trained model) |
+| 1 | **Demand forecast** | `src/ml_demand.py` | Supervised **Ridge regression**; used by the default pipeline |
+| 2 | **Default slotting optimizer** | `src/optimizer.py` | Greedy heuristic + bounded feasible-swap local search; used by the default pipeline |
+| 3 | **MILP assortment selector** | `src/milp_assortment.py` | Two-stage mixed-integer linear program (SciPy `milp`); separate experiment, not wired into the default pipeline |
 
 ### Pipeline
 
@@ -184,6 +187,12 @@ flowchart TD
 
 > [!NOTE]
 > Because the selection gate can pick the baseline, a run is allowed to show **no improvement**. Check `reports/optimization_report.md` (`selected_layout`, `candidate_layouts`) to see which layout won in your run.
+
+### MILP assortment-selection experiment
+
+`src/milp_assortment.py` uses SciPy's mixed-integer linear programming solver in two stages. It first maximizes the number of training orders whose complete SKU sets fit within the selected assortment cap; while retaining that optimum, it then maximizes the number of distinct training orders represented by at least one selected SKU. It filters to products with usable physical metadata and at least one dimensionally fitting location, and supports a candidate-pool limit and solver time limit.
+
+**Integration status:** `scripts/run_pipeline.py` does not import or call this module in the current `Magnus` snapshot. The default pipeline instead uses `select_feasible_candidates` / `select_order_coverage_candidates` from `src/baseline.py` and then runs heuristic slotting/refinement. The MILP module has tests, but its existence does not mean the end-to-end pipeline is using MILP. To make MILP the active selector, the pipeline must call it, evaluate its result under the same constraints, and report solver status/optimality and holdout metrics.
 
 > [!WARNING]
 > **Current branch verification note:** the current `Magnus` snapshot has a pipeline issue in `scripts/run_pipeline.py`: a refinement block references `greedy` outside the scope where that variable is defined. Treat the full pipeline as unverified until this is corrected and rerun.
@@ -336,7 +345,8 @@ Results in this repository may come from different code versions or data snapsho
 | **Unverified checks** | Missing/unknown data. They are *not* violations, but also *not* proof of safety |
 | **Demand forecast** | Next-week recorded order-line counts from history, not a real-time inventory or replenishment system |
 | **Route distance/time** | Estimates from simplified synthetic geometry |
-| **Optimizer** | Heuristic, not a globally optimal solver |
+| **Default slotting optimizer** | Greedy/local-search heuristic; it does not prove global optimality |
+| **MILP assortment experiment** | Exact mixed-integer model for its formulated selection objective when the solver proves optimality; currently not wired into the default pipeline |
 
 ### Known limitations
 
@@ -344,7 +354,7 @@ Results in this repository may come from different code versions or data snapsho
 2. **Inventory is unknown:** Olist has no stock snapshot; representative-stock assumptions must be labeled.
 3. **Hazard and handling data are unknown:** never infer them from category names.
 4. **Demand proxy:** order-item lines are not a measured inventory quantity.
-5. **Heuristic optimization:** feasible under modeled constraints, no global-optimum guarantee.
+5. **Default slotting optimization:** heuristic and not globally optimal. The separate MILP assortment experiment optimizes a different selection objective and is not currently used by the default pipeline.
 6. **Estimated travel:** simulated, not measured.
 7. **Utilization:** low modeled utilization may reflect the representative-stock assumption and assortment scope. Don't tune warehouse size or objectives just to improve the percentage.
 
@@ -361,6 +371,7 @@ SnakeCharmers/
 │   ├── data_loader.py        #   load & normalize Olist tables
 │   ├── demand_analysis.py    #   demand profile, ABC classes
 │   ├── ml_demand.py          #   Ridge next-week forecast
+│   ├── milp_assortment.py    #   experimental MILP assortment selector (not pipeline-wired)
 │   ├── affinity_analysis.py  #   SKU co-occurrence
 │   ├── warehouse_generator.py#   synthetic warehouse locations
 │   ├── baseline.py           #   deterministic baseline allocation
@@ -393,10 +404,11 @@ The Streamlit dashboard (`dashboard.py`) is intended to show generated evaluatio
 
 ## 🔭 Roadmap
 
-A stronger model should only replace Ridge after a **reproducible evaluation proves it is better**.
+Forecasting and assortment optimization are separate tasks: MILP is not a replacement for Ridge. Ridge forecasts demand; a selection optimizer decides which SKUs to include under a cap. Before changing either component, integrate and evaluate it on a reproducible end-to-end comparison.
 
-- [ ] **Trustworthy baseline:** chronological rolling-origin backtests with MAE, RMSE, WAPE (explicit zero-denominator handling), overall and by segment/category; compare against naïve baselines (last week, moving average)
-- [ ] **Stronger tabular models:** benchmark HistGradientBoosting, LightGBM, or CatBoost against Ridge on identical splits/features
+- [ ] **Forecast evaluation:** chronological rolling-origin backtests with MAE, RMSE, WAPE (explicit zero-denominator handling), overall and by segment/category; compare against naïve baselines (last week, moving average)
+- [ ] **Forecast alternatives:** benchmark HistGradientBoosting, LightGBM, or CatBoost against Ridge on identical splits/features
+- [ ] **MILP integration:** wire `src/milp_assortment.py` into the pipeline if desired, then compare against demand-ranked and order-coverage-first selection on the same training/holdout split, SKU cap, physical constraints, runtime, solver status, and test-order coverage
 - [ ] **Features only when justified:** calendar/seasonality, richer lags, reliable price/promo signals, product attributes, with **no future leakage**
 - [ ] **Optimizer upgrades:** benchmark simulated annealing or OR-Tools against the current heuristic; keep hard constraints separate from soft objectives and report runtime and quality
 - [ ] **Config cleanup:** wire or remove unused parameters; unify the heavy-SKU threshold between optimizer and validator
