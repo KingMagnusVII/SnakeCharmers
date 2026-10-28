@@ -123,7 +123,7 @@ Two distinct components work together:
 ### Pipeline
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Load & normalize<br/>3 Olist tables] --> B[Demand profile<br/>+ ABC classes]
     B --> C[Ridge forecast<br/>next-week demand]
     B --> D[Affinity<br/>co-occurrence]
