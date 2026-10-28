@@ -26,5 +26,11 @@ reports/*
 data/input/*
 !data/input/.gitkeep
 
+# Frontend generated files
+node_modules/
+.vite/
+dist/
+*.tsbuildinfo
+
 # Secrets
 .streamlit/secrets.toml
