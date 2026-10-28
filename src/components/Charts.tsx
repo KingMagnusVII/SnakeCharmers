@@ -73,9 +73,9 @@ export function RouteChart() {
       <span>ROUTES <b>{routeRows.length.toLocaleString("en-IN")}</b></span>
       <span>COMPLETE <b>{complete.toLocaleString("en-IN")}</b></span>
     </div>
-    <div className="route-bars">{distances.slice(0, 60).map((distance, i) =>
+    {distances.length ? <div className="route-bars">{distances.slice(0, 60).map((distance, i) =>
       <i key={i} title={`${distance.toFixed(1)} m`} style={{ height: `${Math.max(3, distance / max * 100)}%` }} />
-    )}</div>
+    )}</div> : <div className="empty-state">NO ROUTE DATA LOADED — start the Python API and load optimized pipeline outputs.</div>}
     <p>OPTIMIZED ROUTE OUTPUT // MAGNUS PIPELINE</p>
   </div>;
 }
@@ -84,9 +84,11 @@ export function TrendChart() {
   const baseline = evaluation.total_distance_m?.baseline ?? 0;
   const optimized = evaluation.total_distance_m?.optimized ?? 0;
   const values = [baseline, optimized];
+  const hasEvaluation = baseline > 0 || optimized > 0;
   const max = Math.max(...values, 1);
   return <div className="route-chart">
-    <div className="comparison-bars">
+    {!hasEvaluation && <div className="empty-state">NO EVALUATION METRICS LOADED — verify evaluation_comparison.csv and restart the API.</div>}
+    {hasEvaluation && <div className="comparison-bars">
       {([["BASELINE", baseline], ["OPTIMIZED", optimized]] as [string, number][]).map(([label, value], i) =>
         <div key={label}>
           <strong>{value.toLocaleString("en-IN", { maximumFractionDigits: 1 })} m</strong>
@@ -94,7 +96,7 @@ export function TrendChart() {
           <span>{label}</span>
         </div>
       )}
-    </div>
+    </div>}
     <p>ROUTE DISTANCE COMPARISON // LIVE EVALUATION</p>
   </div>;
 }
