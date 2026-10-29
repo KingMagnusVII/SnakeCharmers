@@ -14,7 +14,7 @@ def select_feasible_candidates(
 ) -> pd.DataFrame:
     """Select demand-ranked SKUs that fit at least one configured location."""
 
-    max_skus = int(config.get("max_active_skus", 200))
+    max_skus = int(config.get("max_active_skus", 500))
     usable = profile[profile.Physical_Metadata_Usable].copy()
     dimensional_fit = product_dimensional_fit(
         usable,
