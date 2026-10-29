@@ -1,4 +1,4 @@
-import {Activity,Boxes,ChartNoAxesCombined,CircleDollarSign,ClipboardCheck,Download,LayoutDashboard,Map,PackageSearch,PackageX,Route,SlidersHorizontal,X,Menu} from "lucide-react";
+import {Activity,BookOpen,Boxes,ChartNoAxesCombined,CircleDollarSign,ClipboardCheck,Download,LayoutDashboard,Map,PackageSearch,PackageX,Route,SlidersHorizontal,X,Menu} from "lucide-react";
 import type {ModuleKey} from "../types";
 
 const modules:{key:ModuleKey;label:string;icon:typeof Activity;num:string}[]=[
@@ -13,6 +13,7 @@ const modules:{key:ModuleKey;label:string;icon:typeof Activity;num:string}[]=[
  {key:"validation",label:"Validation",icon:ClipboardCheck,num:"09"},
  {key:"downloads",label:"Downloads",icon:Download,num:"10"},
  {key:"roi",label:"Advanced ROI",icon:CircleDollarSign,num:"11"},
+ {key:"guide",label:"Project Guide",icon:BookOpen,num:"12"},
 ];
 
 export default function Sidebar({active,onSelect,open,onClose,live}:{active:ModuleKey;onSelect:(key:ModuleKey)=>void;open:boolean;onClose:()=>void;live:boolean}){

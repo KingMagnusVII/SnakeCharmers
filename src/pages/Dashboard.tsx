@@ -1,4 +1,6 @@
 import {useState} from "react";
+import guideMarkdown from "../../GUIDE.md?raw";
+import GuidePortal from "../components/GuidePortal";
 import {Activity,AlertTriangle,Boxes,CheckCircle2,Clock3,Database,Download,MapPinned,Package,PackageX,Play,RotateCcw,Search,TrendingUp} from "lucide-react";
 import type {ModuleKey} from "../types";
 import Panel from "../components/Panel"; import MetricCard from "../components/MetricCard"; import DataTable from "../components/DataTable"; import Warehouse3D from "../components/Warehouse3D";
@@ -15,7 +17,8 @@ const titles:Record<ModuleKey,{title:string;caption:string;tag:string}>={
  analytics:{title:"ANALYTICS",caption:"DISTRIBUTION // VOLUMETRIC FIT",tag:"MODULE 08"},
  validation:{title:"CONSTRAINT VALIDATION",caption:"RULE CHECKS // EXCEPTION INSPECTOR",tag:"MODULE 09"},
  downloads:{title:"DOWNLOADS",caption:"DATA EXPORT // REPORT CENTER",tag:"MODULE 10"},
- roi:{title:"ADVANCED ROI ANALYSIS",caption:"COST MODEL // RETURN ESTIMATES",tag:"MODULE 11"}
+ roi:{title:"ADVANCED ROI ANALYSIS",caption:"COST MODEL // RETURN ESTIMATES",tag:"MODULE 11"},
+ guide:{title:"PROJECT GUIDE",caption:"DOCUMENTATION // SETUP, PIPELINE, AND VALIDATION",tag:"DOCUMENTATION"}
 };
 
 function csvDownload<T extends object>(name:string,rows:T[]){const records=rows as Record<string,unknown>[];const cols=Object.keys(records[0]??{});const csv=[cols.join(","),...records.map(r=>cols.map(c=>JSON.stringify(r[c]??"")).join(","))].join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=name;a.click();URL.revokeObjectURL(a.href)}
@@ -49,6 +52,7 @@ export default function Dashboard({active}:{active:ModuleKey}){
  const filtered=inventory.filter(r=>(zone==="ALL"||r.Zone===zone)&&Object.values(r).some(v=>String(v).toLowerCase().includes(q.toLowerCase())));
  const metrics=[{label:"TOTAL SKU RECORDS",value:formatNum(inventory.length),delta:"DEMO DATASET",icon:<Boxes/>},{label:"WAREHOUSE NODES",value:formatNum(warehouseNodes.length),delta:"SPATIAL MODEL",icon:<MapPinned/>},{label:"ALLOCATED NODES",value:formatNum(warehouseNodes.filter(n=>n.Allocation_Status==="ALLOCATED").length),delta:"ALLOCATION STATUS",icon:<Activity/>},{label:"EXCEPTIONS",value:formatNum(inventory.filter(i=>i.Status!=="ALLOCATED").length),delta:"REQUIRES REVIEW",icon:<AlertTriangle/>}];
  const nodeRows=warehouseNodes.map(n=>({...n,X_m:n.X_m.toFixed(1),Y_m:n.Y_m.toFixed(1),Z_m:n.Z_m.toFixed(1)}));
+ if(active==="guide") return <GuidePortal markdown={guideMarkdown}/>;
  const title=titles[active];
  return <><div className="page-title"><div><div className="eyebrow">{title.tag} <span>// [SECURE_VIEW]</span></div><h2>{title.title}</h2><p>{title.caption}</p></div><div className="page-live"><span className="pulse-dot"/> SYSTEM NOMINAL</div></div><div className="demo-banner"><span>ⓘ</span><strong>{demoNotice}</strong></div>
  {active==="overview"&&<><div className="metrics-grid">{metrics.map(m=><MetricCard key={m.label}{...m}/>)}</div><div className="content-grid two-col"><Panel title="ALLOCATION MATRIX" eyebrow="WAREHOUSE // NODE STATE"><AllocationChart/></Panel><Panel title="DEMAND CLASS DISTRIBUTION" eyebrow="INVENTORY // SKU SEGMENTS"><DemandChart/></Panel></div><div className="content-grid two-col"><Panel title="THROUGHPUT TREND" eyebrow="WEEKLY // ILLUSTRATIVE INDEX"><TrendChart/></Panel><Panel title="SYSTEM EVENT STREAM" eyebrow="EVENT LOG // DEMO"><div className="event-list">{[["00:00:01.204","INFO","Inventory adapter initialized"],["00:00:01.512","SYNC","Warehouse node map loaded"],["00:00:02.008","WARN","Demo records include review flags"],["00:00:02.410","READY","Frontend visualization online"]].map(e=><div className="event" key={e[0]}><code>{e[0]}</code><b className={e[1]==="WARN"?"warn":""}>{e[1]}</b><span>{e[2]}</span></div>)}</div></Panel></div><Panel title="INVENTORY SNAPSHOT" eyebrow="LATEST RECORDS"><DataTable rows={inventory.slice(0,14)}/></Panel></>}

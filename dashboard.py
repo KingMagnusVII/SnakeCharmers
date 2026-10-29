@@ -159,6 +159,70 @@ def plot_3d_category_values(df, category_col, value_col, title, max_points=80):
     st.plotly_chart(fig, use_container_width=True)
 
 
+def build_robot_figure(theme):
+    """Stylized 3D warehouse robot proxy; this is not a live device feed."""
+    fig = go.Figure()
+
+    def ball(x, y, z, size, color, label):
+        fig.add_trace(go.Scatter3d(
+            x=[x], y=[y], z=[z], mode="markers",
+            marker=dict(size=size, color=color, line=dict(color="#000", width=1)),
+            name=label,
+            hovertemplate=f"{label}<br>XYZ: {x}, {y}, {z}<extra></extra>",
+        ))
+
+    ball(0, 0, 1.25, 34, "#333333", "Chassis")
+    ball(0, 0, 2.05, 27, theme["secondary"], "Sensor array")
+    ball(-0.22, -0.19, 2.10, 6, theme["accent"], "Left sensor")
+    ball(0.22, -0.19, 2.10, 6, theme["accent"], "Right sensor")
+    ball(0, 0, 2.48, 5, theme["danger"], "Status beacon")
+    ball(-0.48, 0, 1.35, 13, "#111111", "Left drive")
+    ball(0.48, 0, 1.35, 13, "#111111", "Right drive")
+
+    theta = np.linspace(0, 2 * np.pi, 61)
+    fig.add_trace(go.Scatter3d(
+        x=0.65 * np.cos(theta), y=0.65 * np.sin(theta),
+        z=np.full(len(theta), 0.45), mode="lines",
+        line=dict(color=theme["secondary"], width=2),
+        name="Navigation radius",
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=[0, 0, None, 0, 0.85], y=[0, -1.3, None, 0, 0],
+        z=[2.05, 1.4, None, 2.05, 1.65], mode="lines",
+        line=dict(color=theme["accent"], width=2, dash="dot"),
+        name="Illustrative scan beam",
+    ))
+    fig.update_layout(
+        height=390, margin=dict(l=0, r=0, t=36, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="monospace", color=theme["text"]), showlegend=False,
+        scene=dict(
+            xaxis=dict(visible=False), yaxis=dict(visible=False),
+            zaxis=dict(visible=False), bgcolor="rgba(0,0,0,0)",
+            aspectmode="manual", aspectratio=dict(x=1, y=1, z=1.1),
+        ),
+        title=dict(text="3D DIAGNOSTIC PROXY // NOT LIVE TELEMETRY",
+                   x=0.03, font=dict(size=13, color=theme["accent"])),
+    )
+    return fig
+
+
+def assistant_reply(question):
+    """Rule-based dashboard hints; intentionally not represented as an AI model."""
+    q = question.lower()
+    if any(k in q for k in ["slot", "allocation", "sku", "inventory"]):
+        return "Review Slotting & Inventory, the baseline/optimized layouts, and unallocated SKU output. Missing inventory values should remain unknown."
+    if any(k in q for k in ["route", "pick", "distance", "travel"]):
+        return "Open Pick Routes to inspect route records and distance distributions. Compare baseline and optimized outputs only when both are available."
+    if any(k in q for k in ["what if", "simulate", "scenario", "change"]):
+        return "Use What-If Simulator for an illustrative estimate. Its sliders do not rerun the optimization solver."
+    if any(k in q for k in ["validation", "safe", "hazard", "error", "violation"]):
+        return "Open Constraint Validation and inspect both baseline and optimized reports. UNVERIFIED or missing data must not be treated as a pass."
+    if any(k in q for k in ["graph", "chart", "analytics", "trend"]):
+        return "Open Analytics for available comparison tables and numeric distributions. Charts depend on the pipeline files present."
+    return "I can point you to dashboard modules for slotting, routes, what-if estimates, analytics, and validation. This helper uses keyword rules, not a language model."
+
+
 # ============================================================
 # LOAD REAL PIPELINE OUTPUTS
 # ============================================================
@@ -168,7 +232,11 @@ optimized_layout = load_csv("optimized_layout.csv")
 baseline_layout = load_csv("baseline_layout.csv")
 warehouse = load_csv("warehouse_locations.csv")
 order_routes = load_csv("optimized_routes.csv")
+baseline_routes = load_csv("baseline_routes.csv")
 inventory = load_csv("inventory_snapshot.csv")
+baseline_violations = load_csv("baseline_violations.csv")
+optimized_violations = load_csv("optimized_violations.csv")
+unallocated_skus = load_csv("unallocated_skus.csv")
 
 # ============================================================
 # SIDEBAR MODULE NAVIGATION
@@ -190,6 +258,20 @@ modules = [
 
 with st.sidebar:
     selected_module = st.radio("MODULES", modules)
+
+st.sidebar.divider()
+st.sidebar.markdown("### 🤖 SYS DIAGNOSTICS")
+st.sidebar.caption("RULE-BASED HELPER // NOT A GENERATIVE AI MODEL")
+if "warehouse_ai_messages" not in st.session_state:
+    st.session_state.warehouse_ai_messages = []
+for item in st.session_state.warehouse_ai_messages[-4:]:
+    with st.sidebar.chat_message(item["role"]):
+        st.write(item["content"])
+question = st.sidebar.chat_input("ASK ABOUT A DASHBOARD MODULE...", key="warehouse_ai_input")
+if question:
+    st.session_state.warehouse_ai_messages.append({"role": "user", "content": question})
+    st.session_state.warehouse_ai_messages.append({"role": "assistant", "content": assistant_reply(question)})
+    st.rerun()
 
 st.markdown(
     f"<div class='hero'><h1>WAREHOUSE INTELLIGENCE TERMINAL</h1><div>SMART SLOTting // OPTIMIZATION // ROUTE ANALYSIS</div></div>",
@@ -215,6 +297,14 @@ if selected_module == "SYSTEM OVERVIEW":
     c2.metric("BASELINE DISTANCE", display_number(baseline_distance, " m"))
     c3.metric("DISTANCE SAVED", display_number(distance_saved, " m"))
     c4.metric("COMPLETION RATE", display_number(None if completion is None else completion * 100, "%"))
+
+    robot_col, diagnostic_col = st.columns([1, 1.35])
+    with robot_col:
+        st.plotly_chart(build_robot_figure(theme), use_container_width=True, config={"displayModeBar": True})
+    with diagnostic_col:
+        st.subheader("DIAGNOSTIC VISUALIZATION")
+        st.write("Interactive 3D illustration for interface context.")
+        st.info("This is a stylized proxy, not a live robot, camera feed, or telemetry source.")
 
     if comparison is not None:
         st.subheader("BASELINE VS OPTIMIZED")
@@ -283,10 +373,56 @@ elif selected_module == "OUT-OF-STOCK PRODUCTS":
 
 elif selected_module == "WHAT-IF SIMULATOR":
     st.subheader("WHAT-IF SIMULATOR")
-    st.caption("Scenario controls are estimates until connected to a rerun of the Python optimization pipeline.")
-    multiplier = st.slider("DEMAND MULTIPLIER", 0.50, 2.00, 1.00, 0.05)
-    if optimized_distance is not None:
-        st.metric("ESTIMATED ROUTE DISTANCE", display_number(optimized_distance * multiplier, " m"))
+    st.caption("Capacity-only estimate. These controls do not rerun the allocation optimizer or route solver.")
+
+    location_col = find_column(warehouse, "Location_ID", "Location") if warehouse is not None else None
+    inventory_sku_col = find_column(inventory, "SKU_ID", "SKU") if inventory is not None else None
+    allocated_sku_col = find_column(optimized_layout, "SKU_ID", "SKU") if optimized_layout is not None else None
+    unallocated_sku_col = find_column(unallocated_skus, "SKU_ID", "SKU") if unallocated_skus is not None else None
+
+    total_locations = int(warehouse[location_col].nunique()) if warehouse is not None and location_col else None
+    current_sku_count = int(inventory[inventory_sku_col].nunique()) if inventory is not None and inventory_sku_col else None
+    allocated_count = int(optimized_layout[allocated_sku_col].nunique()) if optimized_layout is not None and allocated_sku_col else None
+    unallocated_count = int(unallocated_skus[unallocated_sku_col].nunique()) if unallocated_skus is not None and unallocated_sku_col else None
+
+    if total_locations is None or total_locations <= 0 or current_sku_count is None or current_sku_count <= 0:
+        st.warning("Simulation needs a warehouse location list and an inventory snapshot with SKU identifiers. Missing data is not treated as zero.")
+    else:
+        controls, outputs = st.columns([1, 1.4])
+        with controls:
+            demand_growth = st.slider("DEMAND CHANGE (%)", min_value=-20, max_value=100, value=20, step=5, key="whatif_demand_growth")
+            usable_capacity = st.slider("USABLE NODES (%)", min_value=50, max_value=100, value=90, step=5, key="whatif_usable_capacity")
+
+        projected_skus = max(0, round(current_sku_count * (1 + demand_growth / 100)))
+        usable_locations = max(0, round(total_locations * usable_capacity / 100))
+        estimated_allocated = min(projected_skus, usable_locations)
+        estimated_overflow = max(0, projected_skus - usable_locations)
+        estimated_coverage = estimated_allocated / projected_skus if projected_skus else 1.0
+
+        with outputs:
+            st.markdown("#### PROJECTION OUTPUT")
+            k1, k2 = st.columns(2)
+            k1.metric("PROJECTED SKUS", f"{projected_skus:,}", f"{demand_growth:+d}% demand")
+            k2.metric("USABLE NODES", f"{usable_locations:,}", f"{usable_capacity - 100:+d}% capacity")
+            k3, k4 = st.columns(2)
+            k3.metric("ESTIMATED FIT", f"{estimated_allocated:,}")
+            k4.metric("ESTIMATED OVERFLOW", f"{estimated_overflow:,}", delta_color="inverse")
+            st.progress(estimated_coverage, text=f"Capacity-only coverage: {estimated_coverage:.1%}")
+
+        current_capacity_fit = min(current_sku_count, total_locations)
+        comparison_df = pd.DataFrame({
+            "Measure": ["SKU demand", "Usable locations", "Estimated fit", "Estimated overflow"],
+            "Current snapshot": [current_sku_count, total_locations, current_capacity_fit, max(0, current_sku_count - total_locations)],
+            "Scenario": [projected_skus, usable_locations, estimated_allocated, estimated_overflow],
+        })
+        st.dataframe(comparison_df, use_container_width=True)
+        comparison_3d = comparison_df.melt(id_vars="Measure", var_name="Scenario type", value_name="Count")
+        comparison_3d["Measure and scenario"] = comparison_3d["Measure"].astype(str) + " // " + comparison_3d["Scenario type"].astype(str)
+        plot_3d_category_values(comparison_3d, "Measure and scenario", "Count", "ILLUSTRATIVE CAPACITY SCENARIO DELTAS")
+        if allocated_count is not None:
+            st.caption(f"Current optimized layout contains {allocated_count:,} distinct SKUs.")
+        if unallocated_count is not None:
+            st.caption(f"Unallocated SKU report contains {unallocated_count:,} distinct SKUs. The scenario estimate does not reproduce the solver's allocation decisions.")
 
 # ============================================================
 # MODULE 07 — PICK ROUTES
@@ -295,12 +431,49 @@ elif selected_module == "WHAT-IF SIMULATOR":
 elif selected_module == "PICK ROUTES":
     st.subheader("PICK ROUTES")
     if order_routes is not None:
-        st.dataframe(order_routes, use_container_width=True)
+        order_col = find_column(order_routes, "Order_ID", "Order")
         distance_col = find_column(order_routes, "Distance_m", "distance")
+        complete_col = find_column(order_routes, "Complete", "Completed", "Completion_Status")
+
+        if order_col:
+            order_ids = order_routes[order_col].dropna().astype(str).drop_duplicates().tolist()
+            if order_ids:
+                selected_order = st.selectbox("INSPECT ORDER", order_ids)
+                optimized_row = order_routes[order_routes[order_col].astype(str) == selected_order].iloc[0]
+                baseline_row = None
+                if baseline_routes is not None:
+                    baseline_order_col = find_column(baseline_routes, "Order_ID", "Order")
+                    if baseline_order_col:
+                        matches = baseline_routes[baseline_routes[baseline_order_col].astype(str) == selected_order]
+                        if not matches.empty:
+                            baseline_row = matches.iloc[0]
+
+                metric_cols = st.columns(3)
+                optimized_distance = pd.to_numeric(optimized_row.get(distance_col), errors="coerce") if distance_col else np.nan
+                metric_cols[0].metric("OPTIMIZED DISTANCE", display_number(optimized_distance, " m"))
+                if baseline_row is not None:
+                    baseline_distance = pd.to_numeric(baseline_row.get(find_column(baseline_routes, "Distance_m", "distance")), errors="coerce")
+                    metric_cols[1].metric("BASELINE DISTANCE", display_number(baseline_distance, " m"))
+                    if pd.notna(optimized_distance) and pd.notna(baseline_distance):
+                        metric_cols[2].metric("DISTANCE DELTA", display_number(baseline_distance - optimized_distance, " m"))
+                    else:
+                        metric_cols[2].metric("DISTANCE DELTA", "N/A")
+                else:
+                    metric_cols[1].metric("BASELINE DISTANCE", "N/A")
+                    metric_cols[2].metric("DISTANCE DELTA", "N/A")
+
+                if complete_col:
+                    st.caption(f"Optimized completion flag: {optimized_row.get(complete_col, 'UNKNOWN')}")
+                st.markdown("#### SELECTED ORDER RECORDS")
+                st.dataframe(order_routes[order_routes[order_col].astype(str) == selected_order], use_container_width=True)
+
+        st.markdown("#### ROUTE DISTANCE DISTRIBUTION")
         if distance_col:
-            st.plotly_chart(px.histogram(order_routes, x=distance_col, title="PICK ROUTE DISTANCES"), use_container_width=True)
+            st.plotly_chart(px.histogram(order_routes, x=distance_col, title="OPTIMIZED PICK ROUTE DISTANCES"), use_container_width=True)
+        st.markdown("#### OPTIMIZED ROUTE RECORDS")
+        st.dataframe(order_routes, use_container_width=True)
     else:
-        st.info("Optimized route output not found.")
+        st.info("Optimized route output not found. Run the route simulation pipeline first.")
 
 # ============================================================
 # MODULE 08 — ANALYTICS
@@ -321,11 +494,36 @@ elif selected_module == "ANALYTICS":
 
 elif selected_module == "CONSTRAINT VALIDATION":
     st.subheader("CONSTRAINT VALIDATION")
-    violations = load_csv("optimized_violations.csv")
-    if violations is not None:
-        st.dataframe(violations, use_container_width=True)
+    baseline_count = len(baseline_violations) if baseline_violations is not None else None
+    optimized_count = len(optimized_violations) if optimized_violations is not None else None
+    unallocated_count = len(unallocated_skus) if unallocated_skus is not None else None
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("BASELINE REPORT ROWS", "N/A" if baseline_count is None else f"{baseline_count:,}")
+    c2.metric("OPTIMIZED REPORT ROWS", "N/A" if optimized_count is None else f"{optimized_count:,}")
+    c3.metric("UNALLOCATED SKU ROWS", "N/A" if unallocated_count is None else f"{unallocated_count:,}")
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### BASELINE VALIDATION")
+        if baseline_violations is not None:
+            st.dataframe(baseline_violations, use_container_width=True)
+        else:
+            st.info("Baseline validation report not found.")
+    with right:
+        st.markdown("#### OPTIMIZED VALIDATION")
+        if optimized_violations is not None:
+            st.dataframe(optimized_violations, use_container_width=True)
+        else:
+            st.info("Optimized validation report not found.")
+
+    st.markdown("#### UNALLOCATED SKU BACKLOG")
+    if unallocated_skus is not None:
+        st.dataframe(unallocated_skus, use_container_width=True)
     else:
-        st.info("Validation output not found. Run the pipeline/validation scripts first.")
+        st.info("Unallocated SKU report not found; this is unknown, not zero.")
+
+    st.caption("These cards count report rows, not necessarily unique violations. Missing reports are shown as N/A, not as a clean validation result.")
 
 # ============================================================
 # MODULE 10 — DOWNLOADS
