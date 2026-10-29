@@ -232,6 +232,7 @@ optimized_layout = load_csv("optimized_layout.csv")
 baseline_layout = load_csv("baseline_layout.csv")
 warehouse = load_csv("warehouse_locations.csv")
 order_routes = load_csv("optimized_routes.csv")
+baseline_routes = load_csv("baseline_routes.csv")
 inventory = load_csv("inventory_snapshot.csv")
 baseline_violations = load_csv("baseline_violations.csv")
 optimized_violations = load_csv("optimized_violations.csv")
@@ -372,10 +373,56 @@ elif selected_module == "OUT-OF-STOCK PRODUCTS":
 
 elif selected_module == "WHAT-IF SIMULATOR":
     st.subheader("WHAT-IF SIMULATOR")
-    st.caption("Scenario controls are estimates until connected to a rerun of the Python optimization pipeline.")
-    multiplier = st.slider("DEMAND MULTIPLIER", 0.50, 2.00, 1.00, 0.05)
-    if optimized_distance is not None:
-        st.metric("ESTIMATED ROUTE DISTANCE", display_number(optimized_distance * multiplier, " m"))
+    st.caption("Capacity-only estimate. These controls do not rerun the allocation optimizer or route solver.")
+
+    location_col = find_column(warehouse, "Location_ID", "Location") if warehouse is not None else None
+    inventory_sku_col = find_column(inventory, "SKU_ID", "SKU") if inventory is not None else None
+    allocated_sku_col = find_column(optimized_layout, "SKU_ID", "SKU") if optimized_layout is not None else None
+    unallocated_sku_col = find_column(unallocated_skus, "SKU_ID", "SKU") if unallocated_skus is not None else None
+
+    total_locations = int(warehouse[location_col].nunique()) if warehouse is not None and location_col else None
+    current_sku_count = int(inventory[inventory_sku_col].nunique()) if inventory is not None and inventory_sku_col else None
+    allocated_count = int(optimized_layout[allocated_sku_col].nunique()) if optimized_layout is not None and allocated_sku_col else None
+    unallocated_count = int(unallocated_skus[unallocated_sku_col].nunique()) if unallocated_skus is not None and unallocated_sku_col else None
+
+    if total_locations is None or total_locations <= 0 or current_sku_count is None or current_sku_count <= 0:
+        st.warning("Simulation needs a warehouse location list and an inventory snapshot with SKU identifiers. Missing data is not treated as zero.")
+    else:
+        controls, outputs = st.columns([1, 1.4])
+        with controls:
+            demand_growth = st.slider("DEMAND CHANGE (%)", min_value=-20, max_value=100, value=20, step=5, key="whatif_demand_growth")
+            usable_capacity = st.slider("USABLE NODES (%)", min_value=50, max_value=100, value=90, step=5, key="whatif_usable_capacity")
+
+        projected_skus = max(0, round(current_sku_count * (1 + demand_growth / 100)))
+        usable_locations = max(0, round(total_locations * usable_capacity / 100))
+        estimated_allocated = min(projected_skus, usable_locations)
+        estimated_overflow = max(0, projected_skus - usable_locations)
+        estimated_coverage = estimated_allocated / projected_skus if projected_skus else 1.0
+
+        with outputs:
+            st.markdown("#### PROJECTION OUTPUT")
+            k1, k2 = st.columns(2)
+            k1.metric("PROJECTED SKUS", f"{projected_skus:,}", f"{demand_growth:+d}% demand")
+            k2.metric("USABLE NODES", f"{usable_locations:,}", f"{usable_capacity - 100:+d}% capacity")
+            k3, k4 = st.columns(2)
+            k3.metric("ESTIMATED FIT", f"{estimated_allocated:,}")
+            k4.metric("ESTIMATED OVERFLOW", f"{estimated_overflow:,}", delta_color="inverse")
+            st.progress(estimated_coverage, text=f"Capacity-only coverage: {estimated_coverage:.1%}")
+
+        current_capacity_fit = min(current_sku_count, total_locations)
+        comparison_df = pd.DataFrame({
+            "Measure": ["SKU demand", "Usable locations", "Estimated fit", "Estimated overflow"],
+            "Current snapshot": [current_sku_count, total_locations, current_capacity_fit, max(0, current_sku_count - total_locations)],
+            "Scenario": [projected_skus, usable_locations, estimated_allocated, estimated_overflow],
+        })
+        st.dataframe(comparison_df, use_container_width=True)
+        comparison_3d = comparison_df.melt(id_vars="Measure", var_name="Scenario type", value_name="Count")
+        comparison_3d["Measure and scenario"] = comparison_3d["Measure"].astype(str) + " // " + comparison_3d["Scenario type"].astype(str)
+        plot_3d_category_values(comparison_3d, "Measure and scenario", "Count", "ILLUSTRATIVE CAPACITY SCENARIO DELTAS")
+        if allocated_count is not None:
+            st.caption(f"Current optimized layout contains {allocated_count:,} distinct SKUs.")
+        if unallocated_count is not None:
+            st.caption(f"Unallocated SKU report contains {unallocated_count:,} distinct SKUs. The scenario estimate does not reproduce the solver's allocation decisions.")
 
 # ============================================================
 # MODULE 07 — PICK ROUTES
@@ -384,12 +431,49 @@ elif selected_module == "WHAT-IF SIMULATOR":
 elif selected_module == "PICK ROUTES":
     st.subheader("PICK ROUTES")
     if order_routes is not None:
-        st.dataframe(order_routes, use_container_width=True)
+        order_col = find_column(order_routes, "Order_ID", "Order")
         distance_col = find_column(order_routes, "Distance_m", "distance")
+        complete_col = find_column(order_routes, "Complete", "Completed", "Completion_Status")
+
+        if order_col:
+            order_ids = order_routes[order_col].dropna().astype(str).drop_duplicates().tolist()
+            if order_ids:
+                selected_order = st.selectbox("INSPECT ORDER", order_ids)
+                optimized_row = order_routes[order_routes[order_col].astype(str) == selected_order].iloc[0]
+                baseline_row = None
+                if baseline_routes is not None:
+                    baseline_order_col = find_column(baseline_routes, "Order_ID", "Order")
+                    if baseline_order_col:
+                        matches = baseline_routes[baseline_routes[baseline_order_col].astype(str) == selected_order]
+                        if not matches.empty:
+                            baseline_row = matches.iloc[0]
+
+                metric_cols = st.columns(3)
+                optimized_distance = pd.to_numeric(optimized_row.get(distance_col), errors="coerce") if distance_col else np.nan
+                metric_cols[0].metric("OPTIMIZED DISTANCE", display_number(optimized_distance, " m"))
+                if baseline_row is not None:
+                    baseline_distance = pd.to_numeric(baseline_row.get(find_column(baseline_routes, "Distance_m", "distance")), errors="coerce")
+                    metric_cols[1].metric("BASELINE DISTANCE", display_number(baseline_distance, " m"))
+                    if pd.notna(optimized_distance) and pd.notna(baseline_distance):
+                        metric_cols[2].metric("DISTANCE DELTA", display_number(baseline_distance - optimized_distance, " m"))
+                    else:
+                        metric_cols[2].metric("DISTANCE DELTA", "N/A")
+                else:
+                    metric_cols[1].metric("BASELINE DISTANCE", "N/A")
+                    metric_cols[2].metric("DISTANCE DELTA", "N/A")
+
+                if complete_col:
+                    st.caption(f"Optimized completion flag: {optimized_row.get(complete_col, 'UNKNOWN')}")
+                st.markdown("#### SELECTED ORDER RECORDS")
+                st.dataframe(order_routes[order_routes[order_col].astype(str) == selected_order], use_container_width=True)
+
+        st.markdown("#### ROUTE DISTANCE DISTRIBUTION")
         if distance_col:
-            st.plotly_chart(px.histogram(order_routes, x=distance_col, title="PICK ROUTE DISTANCES"), use_container_width=True)
+            st.plotly_chart(px.histogram(order_routes, x=distance_col, title="OPTIMIZED PICK ROUTE DISTANCES"), use_container_width=True)
+        st.markdown("#### OPTIMIZED ROUTE RECORDS")
+        st.dataframe(order_routes, use_container_width=True)
     else:
-        st.info("Optimized route output not found.")
+        st.info("Optimized route output not found. Run the route simulation pipeline first.")
 
 # ============================================================
 # MODULE 08 — ANALYTICS
