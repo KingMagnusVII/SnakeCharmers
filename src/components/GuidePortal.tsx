@@ -97,7 +97,8 @@ function parseGuideMarkdown(rawMd: string): GuideDoc {
     }
 
     // Heading check (handles optional markdown escaping artifacts like \#, \##, \###)
-    const headingMatch = rawLine.match(/^\\*(#{1,3})\s+(.+)$/);
+    const headingLine = rawLine.replace(/^\\+(?=#{1,3}\s)/, "");
+    const headingMatch = headingLine.match(/^(#{1,3})\s+(.+)$/);
     if (headingMatch) {
       const level = headingMatch[1].length;
       const title = headingMatch[2].trim().replace(/[*`]/g, "");
