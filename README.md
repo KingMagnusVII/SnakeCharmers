@@ -89,7 +89,7 @@ The API listens at `http://127.0.0.1:8000`. Leave this terminal open.
 **Terminal 2 — React/Vite frontend**
 
 ```powershell
-run dev
+npm run dev
 ```
 
 Open the local URL Vite prints (normally `http://localhost:5173`). The explicit npm path works even when the VS Code terminal has not picked up the Node.js PATH entry. If `npm` works normally in your terminal, `npm run dev` is also fine.
@@ -101,7 +101,7 @@ Open the local URL Vite prints (normally `http://localhost:5173`). The explicit 
 
 ```powershell
 .venv\\Scripts\\python.exe -m pip install -r requirements.txt
-& "C:\\Program Files\\nodejs\\npm.cmd" install
+npm install
 ```
 
 ### Regenerate warehouse/pipeline outputs (only when needed)
@@ -117,7 +117,7 @@ Then restart the API (Terminal 1) to reload the new CSVs. The pipeline has previ
 ### Build check (optional)
 
 ```powershell
-& "C:\\Program Files\\nodejs\\npm.cmd" run build
+npm run build
 ```
 
 This runs the TypeScript check and creates the production frontend build in `dist/`. For local development, use `run dev` as shown above.
