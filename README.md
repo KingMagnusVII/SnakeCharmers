@@ -453,6 +453,37 @@ SnakeCharmers/
 | `data/processed/` | Orders, SKU master, demand profile, allocations, routes, validation, `evaluation_comparison.csv` (typically Git-ignored) |
 | `reports/` | `data_foundation_audit.md`, `eda_report.md`, `ml_demand_report.md`, `optimization_report.md`, `unallocated_sku_diagnosis.md`, `final_validation_report.md`, `correctness_hardening_report.md`, plots, evidence CSVs |
 
+## ☁️ Deploying the frontend with Vercel
+
+The React + TypeScript dashboard is built with Vite and can be deployed to Vercel as a static frontend.
+
+### Deploy from GitHub
+
+1. Push the branch you want to deploy to this GitHub repository.
+2. In [Vercel](https://vercel.com/), choose **Add New → Project** and import `KingMagnusVII/SnakeCharmers`.
+3. Configure the project with these settings:
+
+   | Setting | Value |
+   |---|---|
+   | Framework preset | **Vite** |
+   | Root directory | Repository root |
+   | Install command | `npm install` |
+   | Build command | `npm run build` |
+   | Output directory | `dist` |
+
+4. Select the intended production branch (normally `main`) and deploy. Future pushes to the connected production branch trigger a new deployment; other branches can receive Vercel preview deployments.
+5. Check the deployment logs if the build fails. The same production build can be checked locally with `npm run build`.
+
+### Important: the Python API is separate
+
+Vercel's static frontend deployment does **not** run `scripts/api_server.py` or the Python data pipeline. The current local setup expects the API at `http://127.0.0.1:8000`; on a deployed site, that address points to each visitor's own computer, not your development machine or Vercel.
+
+Therefore, deploying the frontend alone does not make live warehouse data available to other users. To provide live data in production, deploy the Python API to a reachable backend service, configure the frontend to use that backend's public HTTPS URL, and enable the required CORS policy. Do not expose a development server or publish private/raw data. The API also expects generated CSVs in `data/processed/`; generate and deploy the appropriate data before relying on results.
+
+If the backend has not been deployed and configured, treat the Vercel URL as a frontend/UI preview rather than a fully connected production dashboard.
+
+---
+
 ### 📊 Dashboards
 
 The current interactive dashboard is the **React + TypeScript + Vite** app in `src/`. It calls `scripts/api_server.py` at `http://127.0.0.1:8000`, which serves processed CSV data from `data/processed/` through `/api/health`, `/api/overview`, `/api/inventory`, `/api/warehouse/nodes`, `/api/routes`, `/api/validation`, and `/api/downloads`. The frontend includes Overview, Analytics, Pick Routes, and validation/data views, including search and CSV export. The Analytics page contains demand/allocation charts, route-distance comparisons, and a metric inspector. Empty route/evaluation data is shown explicitly rather than presented as a valid zero result. The sidebar reports whether the UI is using live API data or fallback/demo data.
