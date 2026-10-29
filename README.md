@@ -74,14 +74,13 @@ SnakeCharmers is a **reproducible research prototype** that uses historical Olis
 
 ## 🚀 Quick start
 
-> Windows PowerShell. The active interactive dashboard is the **React + TypeScript + Vite frontend** backed by a small local Python API. Run commands from the repository root, `C:\\Magnus\\Code\\SnakeCharmers`. Keep the API and frontend running in separate terminals.
+> Windows PowerShell. The active interactive dashboard is the **React + TypeScript + Vite frontend** backed by a small local Python API. Run commands from the repository root, `SnakeCharmers`. Keep the API and frontend running in separate terminals.
 
 ### Every time you want to use the dashboard
 
 **Terminal 1 — Python API**
 
 ```powershell
-cd C:\\Magnus\\Code\\SnakeCharmers
 .venv\\Scripts\\python.exe scripts\\api_server.py
 ```
 
@@ -90,8 +89,7 @@ The API listens at `http://127.0.0.1:8000`. Leave this terminal open.
 **Terminal 2 — React/Vite frontend**
 
 ```powershell
-cd C:\\Magnus\\Code\\SnakeCharmers
-& "C:\\Program Files\\nodejs\\npm.cmd" run dev
+run dev
 ```
 
 Open the local URL Vite prints (normally `http://localhost:5173`). The explicit npm path works even when the VS Code terminal has not picked up the Node.js PATH entry. If `npm` works normally in your terminal, `npm run dev` is also fine.
@@ -102,7 +100,6 @@ Open the local URL Vite prints (normally `http://localhost:5173`). The explicit 
 ### First-time setup (or after dependencies change)
 
 ```powershell
-cd C:\\Magnus\\Code\\SnakeCharmers
 .venv\\Scripts\\python.exe -m pip install -r requirements.txt
 & "C:\\Program Files\\nodejs\\npm.cmd" install
 ```
